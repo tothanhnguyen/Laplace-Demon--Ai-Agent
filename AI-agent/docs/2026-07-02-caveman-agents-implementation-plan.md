@@ -29,7 +29,7 @@
 - Consumes: Node.js >=18, OpenClaw workspace, Codex profile
 - Produces: Caveman skill discoverable trong OpenClaw và Codex
 
-- [ ] **Step 1: Chạy installer riêng cho OpenClaw**
+- [x] **Step 1: Chạy installer riêng cho OpenClaw**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh |
@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.
 
 Expected: installer ghi skill và bootstrap block vào OpenClaw workspace.
 
-- [ ] **Step 2: Chạy installer riêng cho Codex**
+- [x] **Step 2: Chạy installer riêng cho Codex**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh |
@@ -47,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.
 
 Expected: installer báo `codex` trong danh sách installed hoặc already installed.
 
-- [ ] **Step 3: Kiểm tra artifact**
+- [x] **Step 3: Kiểm tra artifact**
 
 ```bash
 test -f ~/.openclaw/workspace/skills/caveman/SKILL.md
@@ -68,7 +68,7 @@ Expected: ba lệnh tìm thấy OpenClaw skill, một marker block và ít nhấ
 - Consumes: OpenClaw Caveman skill từ Task 1
 - Produces: Hermes skill discovery và always-on lite instruction
 
-- [ ] **Step 1: Backup và copy skill**
+- [x] **Step 1: Backup và copy skill**
 
 ```bash
 cp ~/.hermes/SOUL.md ~/.hermes/SOUL.md.bak.caveman
@@ -79,7 +79,7 @@ cp ~/.openclaw/workspace/skills/caveman/SKILL.md \
 
 Expected: backup và Hermes skill tồn tại.
 
-- [ ] **Step 2: Thêm marker block vào Hermes SOUL**
+- [x] **Step 2: Thêm marker block vào Hermes SOUL**
 
 Thêm đúng một block:
 
@@ -91,7 +91,7 @@ Respond concise in user's language. Remove filler and hedging; keep complete sen
 <!-- caveman-hermes-end -->
 ```
 
-- [ ] **Step 3: Kiểm tra idempotency và discovery**
+- [x] **Step 3: Kiểm tra idempotency và discovery**
 
 ```bash
 test -f ~/.hermes/skills/productivity/caveman/SKILL.md
@@ -111,7 +111,7 @@ Expected: skill tồn tại, marker count bằng 1; nếu Hermes CLI hỗ trợ 
 - Consumes: artifacts từ Task 1–2
 - Produces: cấu hình active cho session mới
 
-- [ ] **Step 1: Restart gateway**
+- [x] **Step 1: Restart gateway**
 
 ```bash
 hermes gateway restart
@@ -120,7 +120,7 @@ openclaw gateway restart
 
 Expected: cả hai command exit 0.
 
-- [ ] **Step 2: Kiểm tra marker và skill lần cuối**
+- [x] **Step 2: Kiểm tra marker và skill lần cuối**
 
 ```bash
 rg -n "caveman-begin|Default intensity" ~/.openclaw/workspace/SOUL.md
@@ -130,4 +130,3 @@ test -s ~/.hermes/skills/productivity/caveman/SKILL.md
 ```
 
 Expected: đủ hai marker, hai skill không rỗng.
-
