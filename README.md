@@ -47,4 +47,3 @@ pytest
 ```
 
 CI chạy hai lệnh trên với Python 3.11 và 3.12.
-# Laplace-Demon---Ai-Agent
