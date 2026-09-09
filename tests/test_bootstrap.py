@@ -57,3 +57,15 @@ def test_module_cli_smoke() -> None:
     assert result.stdout.strip() == (
         "Laplace CLI is ready (environment=test, log_level=WARNING)."
     )
+
+
+def test_sample_agent_cli_explains_stop_reason() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "laplace", "--sample-agent"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "status=completed" in result.stdout
+    assert "completion_reason=" in result.stdout
