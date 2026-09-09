@@ -27,3 +27,7 @@ venv/
 .idea/
 .vscode/
 .DS_Store
+
+# Runtime artifacts
+laplace.db
+var/

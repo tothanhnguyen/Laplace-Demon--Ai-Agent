@@ -9,7 +9,11 @@ description = "A clean bootstrap for rebuilding Laplace's Demon module by module
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "pydantic>=2.7",
     "pydantic-settings>=2.2",
+    "sqlalchemy>=2.0",
+    "aiogram>=3.4",
+    "openai>=1.30",
 ]
 
 [project.optional-dependencies]
