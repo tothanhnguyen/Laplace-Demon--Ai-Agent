@@ -28,11 +28,9 @@ def _retry_delay_from(error: Exception, attempt: int) -> float:
     Output bị giới hạn tối đa 90 giây để tránh ngủ vô hạn. Hàm chỉ parse text
     lỗi, không sleep; vòng ``complete`` mới áp dụng kết quả này.
     """
-    # Tìm hint "retry in Xs" trong lỗi
     match = re.search(r"retry in (\d+(?:\.\d+)?)s", str(error))
     if match:
         return min(float(match.group(1)) + 1.0, 90.0)
-    # Không có hint → backoff tăng dần
     return min(15.0 * (attempt + 1), 90.0)
 
 
@@ -47,9 +45,7 @@ def _compute_cost(
     Model không có giá trả 0.0 và log warning duy nhất một lần mỗi model
     (token vẫn được ghi để theo dõi). Hàm không gọi mạng.
     """
-    # Tra bảng giá theo tên model
     price = (pricing or {}).get(model)
-    # Không có giá → trả 0, cảnh báo 1 lần
     if price is None:
         if model not in _WARNED_UNKNOWN_MODELS:
             _WARNED_UNKNOWN_MODELS.add(model)
@@ -85,7 +81,6 @@ class OpenAIProvider:
                 f"Thiếu API key cho provider '{name}': đặt LAPLACE_{name.upper()}_API_KEY "
                 "trong .env (hoặc chuyển LAPLACE_LLM_PROVIDER=mock để chạy không cần key)."
             )
-        # Tạo OpenAI SDK client (chưa gọi mạng)
         from openai import OpenAI
 
         self._client = OpenAI(api_key=api_key, base_url=base_url)
@@ -114,7 +109,6 @@ class OpenAIProvider:
         # bằng Pydantic và yêu cầu mô hình tự sửa khi sai.
         msgs = list(messages)
         kwargs: dict[str, Any] = {"model": self.model, "messages": msgs}
-        # Nếu có schema → nhúng vào system message + bật json_object mode
         if json_schema is not None:
             msgs.append(
                 {
@@ -132,7 +126,6 @@ class OpenAIProvider:
 
         start = time.monotonic()
         response = None
-        # Gọi API, retry nếu bị 429
         for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
             try:
                 response = self._client.chat.completions.create(**kwargs)
@@ -144,7 +137,6 @@ class OpenAIProvider:
                     raise
                 kwargs.pop("response_format")
             except RateLimitError as e:
-                # Free tier giới hạn theo phút; lỗi 429 thường kèm "retry in Xs".
                 if attempt == RATE_LIMIT_MAX_RETRIES:
                     raise
                 time.sleep(_retry_delay_from(e, attempt))
@@ -153,7 +145,6 @@ class OpenAIProvider:
 
         content: str | None = response.choices[0].message.content
         parsed: dict[str, Any] | None = None
-        # Parse JSON từ response
         if json_schema is not None and content:
             try:
                 data = json.loads(content)
@@ -167,7 +158,6 @@ class OpenAIProvider:
         completion_tokens = usage.completion_tokens if usage else 0
         model = response.model or self.model
 
-        # Tính chi phí và trả kết quả chuẩn hóa
         return LLMResult(
             content=content,
             parsed=parsed,

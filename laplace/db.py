@@ -1,58 +1,83 @@
-"""Khởi tạo engine SQLAlchemy và vòng đời session cho tầng lưu trữ."""
+"""Khởi tạo engine, migration SQLite nhỏ và vòng đời session."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from laplace.config import Settings
 from laplace.models import Base
 
-# Engine singleton, tạo 1 lần dùng lại
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
 
 
-def _create_engine(url: str) -> Engine:
-    """Tạo engine cho URL đã cho; SQLite in-memory dùng chung một connection.
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+    """Bật kiểm tra FK cho từng SQLite connection."""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
-    StaticPool giữ nguyên connection duy nhất để mọi session cùng thấy schema
-    và dữ liệu — thiếu nó mỗi connect sẽ là một DB in-memory rỗng khác nhau.
-    """
-    # SQLite in-memory cần StaticPool để giữ 1 connection chung
+
+def _create_engine(url: str) -> Engine:
+    """Tạo engine; SQLite memory dùng một connection chung cho test."""
+    kwargs = {}
     if url.endswith(":memory:"):
-        return create_engine(
-            url,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-    return create_engine(url)
+        kwargs = {"connect_args": {"check_same_thread": False}, "poolclass": StaticPool}
+    engine = create_engine(url, **kwargs)
+    if engine.dialect.name == "sqlite":
+        event.listen(engine, "connect", _enable_sqlite_foreign_keys)
+    return engine
 
 
 def get_engine() -> Engine:
-    """Trả về engine singleton theo `Settings().database_url`."""
+    """Trả engine singleton theo Settings hiện tại."""
     global _engine, _session_factory
-    # Chưa có engine thì tạo mới theo settings
     if _engine is None:
         _engine = _create_engine(Settings().database_url)
-        _session_factory = sessionmaker(bind=_engine)
+        _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
 
 
+def _migrate_sprint3(engine: Engine) -> None:
+    """Thêm cột nullable Sprint 3 cho DB cũ; chạy lặp lại an toàn."""
+    if engine.dialect.name != "sqlite":
+        return
+    additions = {
+        "conversations": {
+            "summary": "TEXT",
+            "summary_until_message_id": "INTEGER",
+        },
+        "tasks": {
+            "request_message_id": "INTEGER REFERENCES messages(id)",
+        },
+    }
+    with engine.begin() as connection:
+        schema = inspect(connection)
+        tables = set(schema.get_table_names())
+        for table, columns in additions.items():
+            if table not in tables:
+                continue
+            existing = {item["name"] for item in schema.get_columns(table)}
+            for name, sql_type in columns.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
+
+
 def init_db() -> None:
-    """Tạo toàn bộ bảng chưa tồn tại theo metadata của models."""
-    # Tạo tất cả bảng theo models.py
-    Base.metadata.create_all(get_engine())
+    """Tạo schema mới và nâng cấp additive DB Sprint 2."""
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    _migrate_sprint3(engine)
 
 
 @contextmanager
 def session_scope() -> Iterator[Session]:
-    """Mở session, commit khi thành công, rollback khi có exception."""
+    """Mở session, commit thành công hoặc rollback khi lỗi."""
     get_engine()
-    # Mở session → dùng → commit nếu OK, rollback nếu lỗi
-    assert _session_factory is not None  # get_engine luôn khởi tạo factory
+    assert _session_factory is not None
     session = _session_factory()
     try:
         yield session
@@ -65,13 +90,8 @@ def session_scope() -> Iterator[Session]:
 
 
 def reset_engine_for_tests(url: str | None = None) -> None:
-    """Thay engine hiện tại; test truyền URL in-memory, None để về mặc định.
-
-    Engine cũ được dispose để đóng connection; lần `get_engine` kế tiếp sẽ
-    khởi tạo lại theo `url` (hoặc theo Settings nếu `url` là None).
-    """
+    """Đổi engine cho test và dispose engine cũ."""
     global _engine, _session_factory
-    # Đóng engine cũ, tạo engine mới (cho test in-memory)
     if _engine is not None:
         _engine.dispose()
     if url is None:
@@ -79,4 +99,4 @@ def reset_engine_for_tests(url: str | None = None) -> None:
         _session_factory = None
         return
     _engine = _create_engine(url)
-    _session_factory = sessionmaker(bind=_engine)
+    _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)

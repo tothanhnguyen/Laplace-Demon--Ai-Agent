@@ -31,3 +31,10 @@ venv/
 # Runtime artifacts
 laplace.db
 var/
+
+# Evaluation evidence: keep only final Sprint 3 runs
+experiments/results/*
+!experiments/results/20260912T105242Z/
+!experiments/results/20260912T105242Z/**
+!experiments/results/20260916T145221Z/
+!experiments/results/20260916T145221Z/**

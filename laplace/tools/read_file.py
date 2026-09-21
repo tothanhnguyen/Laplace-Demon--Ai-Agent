@@ -14,7 +14,6 @@ from laplace.tools.base import tool
 MAX_BYTES = 64 * 1024  # trần đọc: 64KB đủ cho file văn bản mẫu
 
 
-# Tham số: đường dẫn file (bắt buộc, không rỗng)
 class ReadFileArgs(BaseModel):
     """Tham số của tool read_file, validate trước khi chạy."""
 
@@ -36,17 +35,13 @@ def read_file(args: ReadFileArgs) -> str:
     không phải UTF-8 sẽ ném ValueError để executor gói thành lỗi giải thích
     được cho LLM.
     """
-    # Xác định thư mục gốc (cwd)
     root = Path.cwd().resolve()
     target = (root / args.path).resolve()
-    # Chặn đường dẫn thoát ra ngoài (path traversal)
     if not target.is_relative_to(root):
         raise ValueError("đường dẫn nằm ngoài thư mục làm việc")
     if not target.is_file():
         raise ValueError(f"không tìm thấy file '{args.path}'")
-    # Đọc tối đa 64KB
     data = target.read_bytes()[:MAX_BYTES]
-    # Chỉ chấp nhận file UTF-8
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError as e:

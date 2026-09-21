@@ -15,11 +15,9 @@ def _cut_index(chunk: str) -> int:
     Trả về chỉ số > 0 để đoạn đầu không bao giờ rỗng; ký tự ngắt (newline hay
     khoảng trắng) nằm cuối đoạn trước nên ghép lại vẫn ra nguyên văn.
     """
-    # Ưu tiên cắt tại dòng mới
     newline = chunk.rfind("\n")
     if newline > 0:
         return newline + 1
-    # Tìm khoảng trắng cuối cùng nhưng bỏ qua vị trí 0 (sẽ tạo đoạn rỗng).
     for i in range(len(chunk) - 1, 0, -1):
         if chunk[i].isspace():
             return i + 1
@@ -35,7 +33,6 @@ def split_message(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
     if limit < 1:
         raise ValueError("limit phải >= 1")
     chunks: list[str] = []
-    # Lặp cắt từng đoạn cho tới khi phần còn lại vừa limit
     rest = text
     while len(rest) > limit:
         cut = _cut_index(rest[:limit])

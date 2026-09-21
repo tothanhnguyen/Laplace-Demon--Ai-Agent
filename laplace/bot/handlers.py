@@ -14,13 +14,20 @@ import re
 from pathlib import Path
 
 from aiogram import F, Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import Message
 
 from laplace.bot.textsplit import split_message
 from laplace.db import session_scope
 from laplace.repo import get_or_create_user, user_usage
-from laplace.services.chat import handle_message
+from laplace.services.chat import _run_reserved_message
+from laplace.services.memory import (
+    forget_memory,
+    load_memory,
+    release_turn,
+    request_cancel,
+    try_reserve_turn,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +45,19 @@ START_TEXT = (
     "Cứ nhắn nội dung bạn cần, mình sẽ trả lời và báo tiến độ trong lúc xử lý.\n"
     "Các lệnh hỗ trợ:\n"
     "/help — hướng dẫn sử dụng\n"
-    "/status — thống kê lượt gọi LLM, tokens và chi phí của bạn\n"
-    "/cancel — hủy lượt xử lý đang chạy"
+    "/status — thống kê tokens và chi phí\n"
+    "/memory — xem bộ nhớ phiên trong chat riêng\n"
+    "/forget — xem phạm vi xóa; /forget confirm để xác nhận\n"
+    "/cancel — yêu cầu dừng lượt đang xử lý"
 )
 
 HELP_TEXT = (
     "Cách dùng:\n"
-    "- Nhắn văn bản bất kỳ để hỏi; mình xử lý từng lượt một cho mỗi người.\n"
-    "- /status xem số lời gọi LLM, tokens và chi phí đã dùng.\n"
-    "- /cancel hủy lượt đang xử lý nếu chờ quá lâu.\n"
-    "- Gửi tài liệu (tối đa 10MB) để lưu lại; tính năng tóm tắt tài liệu "
-    "sẽ có ở sprint sau."
+    "- Nhắn văn bản bất kỳ để hỏi; mỗi người chỉ có một lượt chạy tại một thời điểm.\n"
+    "- /status xem usage; /memory xem hội thoại/task gần nhất trong chat riêng.\n"
+    "- /forget chỉ cảnh báo; /forget confirm xóa memory có liên kết nhưng giữ usage.\n"
+    "- /cancel yêu cầu dừng ở checkpoint tiếp theo; lời gọi model/tool đang chạy không bị ngắt.\n"
+    "- File tải lên chưa thuộc phạm vi /forget và chưa được tóm tắt ở Sprint 3."
 )
 
 
@@ -61,14 +70,12 @@ class _StatusEditor:
     """
 
     def __init__(self, status: Message, loop: asyncio.AbstractEventLoop) -> None:
-        # Giữ reference tới message trạng thái và event loop
         self._status = status
         self._loop = loop
         self._latest: str | None = None
         self._draining = False
 
     def push_threadsafe(self, text: str) -> None:
-        # Chuyển text từ worker thread về event loop an toàn
         """Được gọi từ worker thread: đẩy text mới về event loop."""
         self._loop.call_soon_threadsafe(self._push, text)
 
@@ -79,7 +86,6 @@ class _StatusEditor:
             self._loop.create_task(self._drain())
 
     async def _drain(self) -> None:
-        # Lấy text mới nhất và edit message (gộp nếu dồn dập)
         try:
             while self._latest is not None:
                 text = self._latest
@@ -112,7 +118,6 @@ async def cmd_help(message: Message) -> None:
 async def cmd_status(message: Message, telegram_user_id: int, username: str | None) -> None:
     """Báo thống kê sử dụng LLM của chính user hỏi (đọc DB trong thread riêng)."""
 
-        # Đọc DB lấy thống kê usage của user
     def _load_usage() -> dict:
         with session_scope() as session:
             user = get_or_create_user(session, telegram_user_id, username)
@@ -131,14 +136,103 @@ async def cmd_status(message: Message, telegram_user_id: int, username: str | No
 
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, telegram_user_id: int) -> None:
-    """Hủy lượt xử lý đang chạy của chính user; không có thì báo rõ."""
-    # Tìm task đang chạy của user, hủy nếu có
-    task = _running_tasks.get(telegram_user_id)
-    if task is None or task.done():
+    """Yêu cầu worker của user dừng tại checkpoint an toàn kế tiếp."""
+    if not request_cancel(telegram_user_id):
         await message.answer("Hiện không có lượt xử lý nào đang chạy.")
         return
-    task.cancel()
-    await message.answer("Đã hủy lượt xử lý đang chạy.")
+    await message.answer(
+        "Đã yêu cầu hủy. Lời gọi mô hình/công cụ đang chạy sẽ hoàn tất trước khi lượt dừng."
+    )
+
+
+def _is_private(message: Message) -> bool:
+    return str(message.chat.type) in {"private", "ChatType.PRIVATE"}
+
+
+def _memory_text(data: dict | None) -> str:
+    if data is None:
+        return "Bộ nhớ phiên đang trống."
+    lines = [
+        "Bộ nhớ phiên của bạn:",
+        f"- Cuộc hội thoại: {data['conversations']}",
+        f"- Tin nhắn: {data['messages']}",
+        f"- Nhiệm vụ / lời gọi tool: {data['tasks']} / {data['tool_calls']}",
+        f"- Lần hoạt động cuối: {data['last_activity'] or 'chưa có'}",
+        f"- Usage giữ lại: {data['usage']['total_tokens']} tokens, "
+        f"${data['usage']['cost_usd']:.6f}",
+    ]
+    if data.get("busy"):
+        lines.append("- Trạng thái: đang xử lý; đây là dữ liệu đã commit gần nhất")
+    if data.get("summary"):
+        lines.append("- Tóm tắt: " + str(data["summary"])[:800])
+    if data.get("recent_messages"):
+        lines.append("- Hội thoại gần nhất:")
+        lines.extend(
+            f"  {item['role']}: {item['content']}" for item in data["recent_messages"]
+        )
+    if data.get("recent_tasks"):
+        lines.append("- Nhiệm vụ gần nhất:")
+        for item in data["recent_tasks"]:
+            lines.append(f"  #{item['id']} [{item['status']}]: {item['goal']}")
+            remaining = item.get("remaining")
+            if remaining:
+                lines.append(f"    còn lại: {'; '.join(remaining)}")
+            for tool in item.get("tools", []):
+                source = f" [{tool['source']}]" if tool.get("source") else ""
+                outcome = "OK" if tool["ok"] else "ERROR"
+                lines.append(
+                    f"    tool {tool['name']}{source} ({outcome}): {tool['result']}"
+                )
+    return "\n".join(lines)
+
+
+@router.message(Command("memory"))
+async def cmd_memory(message: Message, telegram_user_id: int) -> None:
+    """Xem memory của chính sender; không phát preview trong group."""
+    if not _is_private(message):
+        await message.answer("Hãy mở chat riêng với bot để xem bộ nhớ phiên.")
+        return
+    data = await asyncio.to_thread(load_memory, telegram_user_id)
+    for chunk in split_message(_memory_text(data)):
+        await message.answer(chunk)
+
+
+@router.message(Command("forget"))
+async def cmd_forget(
+    message: Message, telegram_user_id: int, command: CommandObject
+) -> None:
+    """Cảnh báo hoặc xóa memory có liên kết sau xác nhận rõ ràng."""
+    if not _is_private(message):
+        await message.answer("Hãy mở chat riêng với bot để quản lý bộ nhớ phiên.")
+        return
+    if (command.args or "").strip() != "confirm":
+        await message.answer(
+            "Lệnh này xóa conversations, messages, tasks, steps, traces và tool results "
+            "có liên kết của bạn. Usage, file đã tải lên, dữ liệu Telegram/provider và "
+            "tool logs cũ không xác định owner vẫn được giữ.\n"
+            "Gõ /forget confirm để xác nhận."
+        )
+        return
+    status, result = await asyncio.to_thread(forget_memory, telegram_user_id)
+    if status == "busy":
+        await message.answer(
+            "Lượt xử lý vẫn đang chạy. Hãy /cancel, chờ worker dừng rồi thử lại."
+        )
+        return
+    if status == "empty":
+        await message.answer("Bộ nhớ phiên đã trống; lịch sử usage vẫn được giữ.")
+        return
+    assert result is not None
+    suffix = ""
+    if result["legacy_unowned_tool_calls"]:
+        suffix = (
+            "\nMột số tool logs Sprint 2 không có owner nên không thể xóa an toàn "
+            "theo từng người dùng."
+        )
+    await message.answer(
+        "Đã xóa bộ nhớ phiên có liên kết của bạn; lịch sử usage và file tải lên "
+        f"được giữ.{suffix}"
+    )
 
 
 @router.message(F.document)
@@ -151,7 +245,6 @@ async def handle_document(message: Message, telegram_user_id: int) -> None:
     document = message.document
     if document is None:  # filter F.document bảo đảm, giữ guard cho type checker
         return
-    # Kiểm tra kích thước
     size = document.file_size or 0
     if size > MAX_DOCUMENT_BYTES:
         await message.answer(
@@ -160,7 +253,6 @@ async def handle_document(message: Message, telegram_user_id: int) -> None:
         return
 
     # Tên file do người dùng đặt: chỉ giữ ký tự an toàn, tránh path traversal.
-    # Làm sạch tên file, tải về thư mục uploads
     raw_name = document.file_name or "tai-lieu"
     safe_name = re.sub(r"[^\w.\-]+", "_", Path(raw_name).name) or "tai-lieu"
     dest = UPLOAD_DIR / f"{telegram_user_id}_{document.file_unique_id}_{safe_name}"
@@ -175,59 +267,58 @@ async def handle_document(message: Message, telegram_user_id: int) -> None:
 
 @router.message(F.text)
 async def handle_text(message: Message, telegram_user_id: int, username: str | None) -> None:
-    """Chạy một lượt chat: typing action, message trạng thái, worker thread.
-
-    Luồng: gửi typing action và message "Đang xử lý...", chạy ``handle_message``
-    trong thread với callback tiến độ thread-safe, rồi trả lời (cắt đoạn nếu
-    dài hơn 4096 ký tự). Task được ghi vào registry để /cancel hủy được; hủy
-    chỉ ngắt phía chờ, thread nền chạy nốt rồi bị bỏ kết quả — chấp nhận được
-    cho phạm vi hiện tại.
-    """
+    """Reserve trước await, chạy worker thread và chỉ worker thật release lease."""
     text = (message.text or "").strip()
     if not text:
         return
     if text.startswith("/"):
-        # Lệnh không được handler nào nhận: không đưa vào LLM (lệnh vốn miễn quota).
         await message.answer("Lệnh không được hỗ trợ. Gõ /help để xem hướng dẫn.")
         return
-    # Từ chối nếu đang xử lý lượt khác
-    if (running := _running_tasks.get(telegram_user_id)) is not None and not running.done():
+
+    lease = try_reserve_turn(telegram_user_id)
+    if lease is None:
         await message.answer(
-            "Mình đang xử lý một yêu cầu khác của bạn. Chờ xong hoặc dùng /cancel nhé."
+            "Mình đang xử lý một yêu cầu khác. Chờ xong hoặc dùng /cancel nhé."
         )
         return
-
-    # Gửi typing + tin trạng thái
-    await message.bot.send_chat_action(message.chat.id, "typing")
-    status = await message.answer(PROCESSING_TEXT)
-    loop = asyncio.get_running_loop()
-    editor = _StatusEditor(status, loop)
-
-    # Tạo task chạy agent trong thread riêng
-    task = asyncio.create_task(
-        asyncio.to_thread(
-            handle_message, telegram_user_id, username, text, editor.push_threadsafe
-        )
-    )
-    _running_tasks[telegram_user_id] = task
+    worker_started = False
     try:
-    # Chờ kết quả, bắt lỗi hủy/crash
-        reply = await task
-    except asyncio.CancelledError:
-        # /cancel hủy task này; handler bản thân không bị hủy nên chỉ báo lại.
-        await editor.edit("Lượt xử lý đã bị hủy.")
-        return
-    except Exception:
-        logger.exception("Xử lý tin nhắn của user %s thất bại", telegram_user_id)
-        await editor.edit("Có lỗi khi xử lý yêu cầu. Bạn thử lại sau nhé.")
-        return
-    finally:
-    # Xóa task khỏi registry khi xong
-        if _running_tasks.get(telegram_user_id) is task:
-            del _running_tasks[telegram_user_id]
+        await message.bot.send_chat_action(message.chat.id, "typing")
+        status = await message.answer(PROCESSING_TEXT)
+        loop = asyncio.get_running_loop()
+        editor = _StatusEditor(status, loop)
+        task = asyncio.create_task(
+            asyncio.to_thread(
+                _run_reserved_message,
+                lease,
+                telegram_user_id,
+                username,
+                text,
+                editor.push_threadsafe,
+            )
+        )
+        worker_started = True
+        _running_tasks[telegram_user_id] = task
 
-    # Chia tin nhắn dài rồi gửi
-    chunks = split_message(reply.text) or ["(Không có nội dung trả lời.)"]
-    await editor.edit(chunks[0])
-    for chunk in chunks[1:]:
-        await message.answer(chunk)
+        def clear_finished(finished: asyncio.Task) -> None:
+            if _running_tasks.get(telegram_user_id) is finished:
+                del _running_tasks[telegram_user_id]
+
+        task.add_done_callback(clear_finished)
+        try:
+            reply = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await editor.edit("Handler đã dừng chờ; worker vẫn hoàn tất an toàn.")
+            raise
+        except Exception:
+            logger.exception("Xử lý tin nhắn của user %s thất bại", telegram_user_id)
+            await editor.edit("Có lỗi khi xử lý yêu cầu. Bạn thử lại sau nhé.")
+            return
+
+        chunks = split_message(reply.text) or ["(Không có nội dung trả lời.)"]
+        await editor.edit(chunks[0])
+        for chunk in chunks[1:]:
+            await message.answer(chunk)
+    finally:
+        if not worker_started:
+            release_turn(lease)
