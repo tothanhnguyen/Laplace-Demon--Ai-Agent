@@ -12,7 +12,6 @@ import threading
 import time
 from collections.abc import Callable
 
-# Mặc định: mỗi user tối đa 5 yêu cầu mỗi phút.
 DEFAULT_MAX_REQUESTS = 5
 DEFAULT_WINDOW_S = 60.0
 
@@ -39,12 +38,10 @@ class TokenBucket:
         self.window_s = window_s
         self._rate = max_requests / window_s  # token nạp lại mỗi giây
         self._clock = clock
-        # user_id -> (số token hiện có, thời điểm nạp gần nhất)
         self._buckets: dict[int, tuple[float, float]] = {}
         self._lock = threading.Lock()
 
     def _refill(self, user_id: int, now: float) -> float:
-        # Tính token tích lũy từ lần trước, cập nhật bucket
         """Nạp token tích lũy từ lần truy cập trước và trả về số token hiện có."""
         tokens, last = self._buckets.get(user_id, (float(self.max_requests), now))
         tokens = min(float(self.max_requests), tokens + (now - last) * self._rate)
@@ -53,7 +50,6 @@ class TokenBucket:
 
     def allow(self, user_id: int) -> bool:
         """True nếu yêu cầu được nhận (trừ một token); False nếu đã hết lượt."""
-        # Nạp lại token, đủ thì trừ 1 và cho qua
         now = self._clock()
         with self._lock:
             tokens = self._refill(user_id, now)
@@ -69,7 +65,6 @@ class TokenBucket:
         không hứa sớm hơn thực tế.
         """
         now = self._clock()
-        # Tính số giây chờ, làm tròn lên
         with self._lock:
             tokens = self._refill(user_id, now)
             if tokens >= 1.0:

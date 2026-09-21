@@ -26,9 +26,14 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     openai_api_key: str = ""
     groq_api_key: str = ""
+    bai_api_key: str = ""
+    router9_api_key: str = ""
 
     # Lưu trữ: SQLite theo thiết kế Sprint 1; đường dẫn tương đối tính từ repo.
     database_url: str = "sqlite:///laplace.db"
 
     # Telegram: token lấy từ @BotFather; rỗng thì lệnh --bot báo lỗi hướng dẫn.
     telegram_bot_token: str = ""
+
+    # Context Sprint 3: ngân sách ký tự cho messages do ứng dụng dựng.
+    context_max_chars: int = 12_000

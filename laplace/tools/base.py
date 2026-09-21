@@ -13,7 +13,6 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 
-# Kết quả chạy tool: ok=True/False + data hoặc error
 @dataclass
 class ToolResult:
     """Kết quả thống nhất của một lần chạy tool.
@@ -27,7 +26,6 @@ class ToolResult:
     error: str = ""
 
 
-# Thông tin 1 tool: tên, mô tả, schema tham số, hàm chạy
 @dataclass
 class ToolSpec:
     """Metadata và callable runtime của một tool đã đăng ký."""
@@ -46,11 +44,9 @@ class ToolSpec:
         }
 
 
-# Bộ nhớ chứa tất cả tool đã đăng ký
 _REGISTRY: dict[str, ToolSpec] = {}
 
 
-# Decorator: gắn hàm vào registry với tên và schema
 def tool(name: str, description: str, args_model: type[BaseModel]):
     """Decorator đăng ký callable cùng metadata vào registry toàn cục."""
 
@@ -83,7 +79,6 @@ def load_builtin_tools() -> None:
     from laplace.tools import read_file  # noqa: F401
 
 
-# Chạy tool: kiểm tra tồn tại → validate tham số → chạy → bắt lỗi
 def execute(name: str, params: dict[str, Any]) -> ToolResult:
     """Thực thi tool qua boundary thống nhất: validate schema rồi chạy.
 
@@ -93,15 +88,12 @@ def execute(name: str, params: dict[str, Any]) -> ToolResult:
     """
     spec = get_tool(name)
     if spec is None:
-        # Tool không tồn tại → trả lỗi kèm danh sách tool hợp lệ
         valid = ", ".join(sorted(_REGISTRY)) or "(trống)"
         return ToolResult(ok=False, error=f"Tool '{name}' không tồn tại. Tool hợp lệ: {valid}.")
     try:
-        # Tham số sai schema → trả lỗi để LLM sửa
         parsed = spec.args_model.model_validate(params)
     except ValidationError as e:
         return ToolResult(ok=False, error=f"Tham số sai schema cho tool '{name}': {e}")
-    # Chạy tool, lỗi runtime cũng được bắt
     try:
         return ToolResult(ok=True, data=spec.run(parsed))
     except Exception as e:  # boundary: lỗi tool không được làm vỡ agent

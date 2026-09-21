@@ -8,11 +8,9 @@ mình (không import module khác trong package) để test import rẻ; factory
 
 from dataclasses import dataclass, field
 
-# Bảng giá: {model: (USD/1M token input, USD/1M token output)}
 Pricing = dict[str, tuple[float, float]]
 
 
-# Mỗi preset = 1 nhà cung cấp LLM
 @dataclass(frozen=True)
 class ProviderPreset:
     """Mô tả một nhà cung cấp: endpoint, model mặc định và bảng giá."""
@@ -35,8 +33,6 @@ class ProviderPreset:
         return f"{self.name}_api_key"
 
 
-# Base URL tra theo tài liệu chính thức từng hãng (OpenAI-compatible endpoint).
-# Danh sách các hãng hỗ trợ sẵn
 PRESETS: dict[str, ProviderPreset] = {
     p.name: p
     for p in [
@@ -48,6 +44,9 @@ PRESETS: dict[str, ProviderPreset] = {
             key_url="https://aistudio.google.com/apikey",
             pricing={
                 "gemini-3.6-flash": (0.30, 2.50),
+                # Gemini 3.5 Flash-Lite Standard: $0.30/$2.50 per 1M tokens
+                # (ai.google.dev/gemini-api/docs/pricing, tra cứu 2026-09-11)
+                "gemini-3.5-flash-lite": (0.30, 2.50),
                 "gemini-2.5-flash": (0.30, 2.50),
                 "gemini-2.5-flash-lite": (0.10, 0.40),
                 "gemini-2.5-pro": (1.25, 10.00),
@@ -68,6 +67,31 @@ PRESETS: dict[str, ProviderPreset] = {
             },
         ),
         ProviderPreset(
+            name="bai",
+            label="B.AI",
+            base_url="https://api.b.ai/v1",
+            default_model="gpt-5.2",
+            key_url="https://chat.b.ai/chat",
+            pricing={
+                # B.AI standard pricing, USD/1M tokens.
+                # docs.b.ai/llmservice/pricing-and-usage/, tra cứu 2026-09-16.
+                "gpt-5.2": (1.75, 14.00),
+            },
+        ),
+        ProviderPreset(
+            name="router9",
+            label="9Router (local)",
+            base_url="http://127.0.0.1:20128/v1",
+            default_model="cx/gpt-5.6-sol",
+            key_url="http://127.0.0.1:20128/dashboard",
+            pricing={
+                # Route qua subscription Codex: chi phí biên mỗi request là 0;
+                # phí thuê bao và quota không thể quy đổi chính xác theo token.
+                "cx/gpt-5.6-sol": (0.0, 0.0),
+                "gpt-5.6-sol": (0.0, 0.0),
+            },
+        ),
+        ProviderPreset(
             name="groq",
             label="Groq",
             base_url="https://api.groq.com/openai/v1",
@@ -84,7 +108,6 @@ PRESETS: dict[str, ProviderPreset] = {
 
 def mask_key(key: str | None) -> str:
     """Che API key khi hiển thị, không bao giờ trả toàn bộ secret."""
-    # Chỉ hiện 6 ký tự đầu + "..."
     if not key:
         return "(chưa đặt)"
     prefix = key[:6] if len(key) > 6 else key[:2]
@@ -93,7 +116,6 @@ def mask_key(key: str | None) -> str:
 
 def missing_key_message(preset: ProviderPreset) -> str:
     """Tạo hướng dẫn thiếu key đúng theo provider preset."""
-    # Tạo thông báo lỗi kèm link lấy key
     return (
         f"Thiếu API key cho provider '{preset.name}' ({preset.label}). "
         f"Lấy key tại {preset.key_url} rồi đặt {preset.env_key} trong .env, "

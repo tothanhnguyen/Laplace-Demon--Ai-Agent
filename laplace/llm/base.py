@@ -18,17 +18,11 @@ class LLMResult:
     cost, latency và model phục vụ ghi bảng ``llm_calls`` (S2-06).
     """
 
-    # Nội dung text thô LLM trả về
     content: str | None = None
-    # Dict JSON đã parse (nếu có schema)
     parsed: dict[str, Any] | None = None
-    # Số token đầu vào
     prompt_tokens: int = 0
-    # Số token đầu ra
     completion_tokens: int = 0
-    # Chi phí USD ước tính
     cost_usd: float = 0.0
-    # Thời gian phản hồi (ms)
     latency_ms: int = 0
     model: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
@@ -71,11 +65,9 @@ def resolve_provider_config(name: str) -> tuple[Any, str | None, str]:
     from laplace.config import Settings
     from laplace.llm.presets import PRESETS
 
-    # Đọc preset và key từ settings
     preset = PRESETS[name]
     settings = Settings()
     api_key = getattr(settings, preset.settings_field, "") or None
-    # Ưu tiên model override > model mặc định
     model = settings.llm_model or preset.default_model
     return preset, api_key, model
 
@@ -91,14 +83,12 @@ def get_provider(name: str | None = None) -> LLMProvider:
     from laplace.config import Settings
     from laplace.llm.presets import PRESETS, missing_key_message
 
-    # Tên lạ hoặc 'mock' → dùng MockLLM
     name = name or Settings().llm_provider
     if name not in PRESETS:  # mock và mọi tên lạ -> MockLLM
         from laplace.llm.mock import MockLLM
 
         return MockLLM()
 
-    # Provider thật: kiểm tra key, thiếu thì báo lỗi hướng dẫn
     preset, api_key, model = resolve_provider_config(name)
     if not api_key:
         raise MissingAPIKeyError(missing_key_message(preset))

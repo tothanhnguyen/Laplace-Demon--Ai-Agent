@@ -26,7 +26,6 @@ class MockLLM:
 
     def __init__(self, script: list[dict[str, Any] | str] | None = None):
         """Khởi tạo script độc lập (copy) và bộ nhớ log các lần gọi."""
-        # Copy script để pop không ảnh hưởng list gốc
         self._script = list(script) if script else None
         self.calls: list[dict[str, Any]] = []  # log để test assert
 
@@ -43,9 +42,7 @@ class MockLLM:
         schema và không mô phỏng latency; caller vẫn phải xử lý ``parsed``
         như với provider thật.
         """
-        # Ghi log request
         self.calls.append({"messages": messages, "json_schema": json_schema})
-        # Chế độ scripted: trả lần lượt từng item
         if self._script is not None:
             if not self._script:
                 raise RuntimeError("MockLLM script exhausted")
@@ -54,7 +51,6 @@ class MockLLM:
                 return LLMResult(parsed=item, model="mock", prompt_tokens=10, completion_tokens=10)
             return LLMResult(content=item, model="mock", prompt_tokens=10, completion_tokens=10)
 
-        # Heuristic mode: đủ cho chạy toàn tuyến offline.
         if json_schema is not None:
             props = json_schema.get("properties", {})
             if "action" in props:

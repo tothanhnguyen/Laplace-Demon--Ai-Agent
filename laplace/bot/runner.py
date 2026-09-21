@@ -20,27 +20,22 @@ logger = logging.getLogger(__name__)
 
 async def run_bot() -> None:
     """Chạy long polling; đóng session bot khi polling kết thúc hoặc lỗi."""
-    # Đọc token từ settings
     settings = Settings()
     if not settings.telegram_bot_token:
-        # Thiếu token → báo lỗi hướng dẫn
         raise RuntimeError(
             "Thiếu Telegram bot token. Tạo bot qua @BotFather trên Telegram, "
             "rồi đặt biến môi trường LAPLACE_TELEGRAM_BOT_TOKEN (hoặc trong .env) "
             "và chạy lại."
         )
 
-    # Idempotent: bảo đảm schema DB sẵn sàng trước khi handler ghi/đọc.
     init_db()
 
-    # Khởi tạo bot + dispatcher, gắn middleware và router
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher()
     dp.message.middleware(IdentityRateLimitMiddleware())
     dp.include_router(router)
 
     logger.info("Telegram bot bắt đầu polling...")
-    # Bắt đầu long polling, đóng session khi dừng
     try:
         await dp.start_polling(bot)
     finally:

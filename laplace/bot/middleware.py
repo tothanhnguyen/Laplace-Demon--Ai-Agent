@@ -33,16 +33,13 @@ class IdentityRateLimitMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         """Bổ sung identity, kiểm tra quota rồi mới chuyển tiếp cho handler."""
-        # Bỏ qua update không có người gửi
         if not isinstance(event, Message) or event.from_user is None:
             return None
 
-        # Gắn identity vào data
         user_id = event.from_user.id
         data["telegram_user_id"] = user_id
         data["username"] = event.from_user.username
 
-        # Lệnh / miễn quota; chỉ tin thường mới tính rate limit
         is_command = bool(event.text and event.text.startswith("/"))
         if not is_command and not self.bucket.allow(user_id):
             wait_s = int(self.bucket.retry_after(user_id))

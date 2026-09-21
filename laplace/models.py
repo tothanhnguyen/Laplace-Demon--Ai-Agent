@@ -1,4 +1,4 @@
-"""Mô hình ORM SQLAlchemy 2.0 cho tầng lưu trữ SQLite của Sprint 1-2."""
+"""Mô hình ORM SQLAlchemy 2.0 cho lưu trữ và memory Sprint 3."""
 
 from datetime import UTC, datetime
 
@@ -15,7 +15,6 @@ class Base(DeclarativeBase):
     """Lớp gốc cho mọi bảng; giữ chung metadata để create_all một lần."""
 
 
-# Bảng users: thông tin người dùng Telegram
 class User(Base):
     """Người dùng Telegram, định danh duy nhất qua telegram_user_id."""
 
@@ -29,7 +28,6 @@ class User(Base):
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="user")
 
 
-# Bảng conversations: phiên hội thoại của user
 class Conversation(Base):
     """Một phiên hội thoại của người dùng, chứa chuỗi tin nhắn theo thời gian."""
 
@@ -38,12 +36,13 @@ class Conversation(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_until_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     user: Mapped[User] = relationship(back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(back_populates="conversation")
 
 
-# Bảng messages: tin nhắn trong hội thoại
 class Message(Base):
     """Tin nhắn trong hội thoại với vai trò user/assistant/system."""
 
@@ -58,7 +57,6 @@ class Message(Base):
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
 
-# Bảng tasks: nhiệm vụ agent do user tạo
 class Task(Base):
     """Nhiệm vụ Agent do người dùng khởi tạo, theo dõi qua status."""
 
@@ -69,13 +67,15 @@ class Task(Base):
     conversation_id: Mapped[int | None] = mapped_column(
         ForeignKey("conversations.id"), nullable=True
     )
+    request_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id"), nullable=True
+    )
     goal: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(24), default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
-# Bảng steps: từng bước trong nhiệm vụ
 class Step(Base):
     """Một bước của nhiệm vụ, đánh số theo step_index để tái hiện tiến trình."""
 
@@ -90,7 +90,6 @@ class Step(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
-# Bảng tool_calls: log mỗi lần gọi tool
 class ToolCall(Base):
     """Log một lần gọi tool: tham số, kết quả JSON và độ trễ để soi lỗi."""
 
@@ -107,7 +106,6 @@ class ToolCall(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
-# Bảng llm_calls: log mỗi lần gọi LLM kèm chi phí
 class LLMCall(Base):
     """Log một lần gọi LLM kèm token/chi phí.
 
@@ -130,7 +128,6 @@ class LLMCall(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
-# Bảng traces: snapshot suy luận của agent
 class Trace(Base):
     """Snapshot JSON theo từng bước để tái hiện quá trình suy luận của Agent."""
 
