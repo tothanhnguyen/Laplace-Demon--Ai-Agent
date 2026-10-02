@@ -1,0 +1,237 @@
+{
+  "schema_version": 2,
+  "mode": "live",
+  "requested_provider": "gemini",
+  "resolved_provider": "gemini",
+  "models": [],
+  "python": "3.14.6",
+  "strategies": [
+    "full",
+    "window10",
+    "sprint3"
+  ],
+  "repeat": 1,
+  "started_at": "2026-09-15T04:57:27.521915+00:00",
+  "finished_at": "2026-09-15T04:57:41.409276+00:00",
+  "code_revision": "cc9568936a7b1d09a4a4545e923eef5558da8343",
+  "source_sha256": "19c2c24cff82dca6875ad641a6e507d8c5bc4a46210464845d75485ebc7393f8",
+  "working_tree_dirty": true,
+  "fixture_sha256": "6b7466870a0ddb2f8211fd90b15c3df9f98e3ca6c351dabbf2b0b3db188dbe63",
+  "parameters": {
+    "context_max_chars": 12000,
+    "case_count": 8
+  },
+  "requested_cases": [
+    "E-04"
+  ],
+  "expected_result_count": 3,
+  "completed_result_count": 0,
+  "incomplete": true,
+  "limits": {
+    "max_calls": 50,
+    "stop_after_observed_usd": 0.2,
+    "pacing_seconds": 6.0,
+    "limit_hit": false,
+    "stop_reason": null,
+    "transient_retries": 0
+  },
+  "aggregate": {
+    "full": {
+      "completed_cases": 0,
+      "successes": 0,
+      "unsupported_claims": 0,
+      "total_tokens": 0,
+      "estimated_usd": 0.0
+    },
+    "window10": {
+      "completed_cases": 0,
+      "successes": 0,
+      "unsupported_claims": 0,
+      "total_tokens": 0,
+      "estimated_usd": 0.0
+    },
+    "sprint3": {
+      "completed_cases": 0,
+      "successes": 0,
+      "unsupported_claims": 0,
+      "total_tokens": 0,
+      "estimated_usd": 0.0
+    }
+  },
+  "results": [
+    {
+      "case_id": "E-04",
+      "rubric_id": "E-04",
+      "strategy": "full",
+      "answer": "",
+      "error": "NotFoundError: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API.', 'status': 'NOT_FOUND'}}]",
+      "runtime_status": "error",
+      "stop_reason": "NotFoundError: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API.', 'status': 'NOT_FOUND'}}]",
+      "task_success": false,
+      "expected": {
+        "FACT_E04_HEAD": false,
+        "FACT_E04_TAIL": false,
+        "e04.txt": false
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 1,
+      "calls_by_purpose": {
+        "agent_action": 1
+      },
+      "schema_instruction_chars": 1341,
+      "sum_application_chars": 1599,
+      "peak_application_chars": 1599,
+      "tool_executions": 0,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [],
+      "elapsed_ms": 766,
+      "evidence_available_last_call": {
+        "FACT_E04_HEAD": false,
+        "FACT_E04_TAIL": false,
+        "e04.txt": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1599,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-04",
+      "rubric_id": "E-04",
+      "strategy": "window10",
+      "answer": "",
+      "error": "NotFoundError: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API.', 'status': 'NOT_FOUND'}}]",
+      "runtime_status": "error",
+      "stop_reason": "NotFoundError: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API.', 'status': 'NOT_FOUND'}}]",
+      "task_success": false,
+      "expected": {
+        "FACT_E04_HEAD": false,
+        "FACT_E04_TAIL": false,
+        "e04.txt": false
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 1,
+      "calls_by_purpose": {
+        "agent_action": 1
+      },
+      "schema_instruction_chars": 1341,
+      "sum_application_chars": 1599,
+      "peak_application_chars": 1599,
+      "tool_executions": 0,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [],
+      "elapsed_ms": 6544,
+      "evidence_available_last_call": {
+        "FACT_E04_HEAD": false,
+        "FACT_E04_TAIL": false,
+        "e04.txt": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1599,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-04",
+      "rubric_id": "E-04",
+      "strategy": "sprint3",
+      "answer": "",
+      "error": "NotFoundError: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API.', 'status': 'NOT_FOUND'}}]",
+      "runtime_status": "error",
+      "stop_reason": "NotFoundError: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API.', 'status': 'NOT_FOUND'}}]",
+      "task_success": false,
+      "expected": {
+        "FACT_E04_HEAD": false,
+        "FACT_E04_TAIL": false,
+        "e04.txt": false
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 1,
+      "calls_by_purpose": {
+        "agent_action": 1
+      },
+      "schema_instruction_chars": 1341,
+      "sum_application_chars": 1599,
+      "peak_application_chars": 1599,
+      "tool_executions": 0,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [],
+      "elapsed_ms": 6536,
+      "evidence_available_last_call": {
+        "FACT_E04_HEAD": false,
+        "FACT_E04_TAIL": false,
+        "e04.txt": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1599,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        }
+      ],
+      "repeat": 0
+    }
+  ]
+}

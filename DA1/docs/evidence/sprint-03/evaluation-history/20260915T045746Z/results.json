@@ -1,0 +1,335 @@
+{
+  "schema_version": 2,
+  "mode": "live",
+  "requested_provider": "gemini",
+  "resolved_provider": "gemini",
+  "models": [
+    "gemini-3.5-flash-lite"
+  ],
+  "python": "3.14.6",
+  "strategies": [
+    "full",
+    "window10",
+    "sprint3"
+  ],
+  "repeat": 1,
+  "started_at": "2026-09-15T04:57:46.477716+00:00",
+  "finished_at": "2026-09-15T04:59:07.680123+00:00",
+  "code_revision": "cc9568936a7b1d09a4a4545e923eef5558da8343",
+  "source_sha256": "19c2c24cff82dca6875ad641a6e507d8c5bc4a46210464845d75485ebc7393f8",
+  "working_tree_dirty": true,
+  "fixture_sha256": "6b7466870a0ddb2f8211fd90b15c3df9f98e3ca6c351dabbf2b0b3db188dbe63",
+  "parameters": {
+    "context_max_chars": 12000,
+    "case_count": 8
+  },
+  "requested_cases": [
+    "E-04"
+  ],
+  "expected_result_count": 3,
+  "completed_result_count": 3,
+  "incomplete": false,
+  "limits": {
+    "max_calls": 50,
+    "stop_after_observed_usd": 0.2,
+    "pacing_seconds": 6.0,
+    "limit_hit": false,
+    "stop_reason": null,
+    "transient_retries": 0
+  },
+  "aggregate": {
+    "full": {
+      "completed_cases": 1,
+      "successes": 1,
+      "unsupported_claims": 0,
+      "total_tokens": 3639,
+      "estimated_usd": 0.001547
+    },
+    "window10": {
+      "completed_cases": 1,
+      "successes": 1,
+      "unsupported_claims": 0,
+      "total_tokens": 3817,
+      "estimated_usd": 0.001763
+    },
+    "sprint3": {
+      "completed_cases": 1,
+      "successes": 1,
+      "unsupported_claims": 0,
+      "total_tokens": 3846,
+      "estimated_usd": 0.001809
+    }
+  },
+  "results": [
+    {
+      "case_id": "E-04",
+      "rubric_id": "E-04",
+      "strategy": "full",
+      "answer": "Đã đọc thành công file e04.txt với nội dung bắt đầu bằng FACT_E04_HEAD và kết thúc bằng FACT_E04_TAIL.",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 4,
+        "prompt_tokens": 3432,
+        "completion_tokens": 207,
+        "total_tokens": 3639,
+        "cost_usd": 0.001547
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 4,
+      "calls_by_purpose": {
+        "agent_action": 4
+      },
+      "schema_instruction_chars": 5364,
+      "sum_application_chars": 13528,
+      "peak_application_chars": 7616,
+      "tool_executions": 3,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null
+      ],
+      "elapsed_ms": 22893,
+      "evidence_available_last_call": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1599,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 1897,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 2416,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7616,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": true,
+            "FACT_E04_TAIL": true,
+            "e04.txt": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-04",
+      "rubric_id": "E-04",
+      "strategy": "window10",
+      "answer": "File e04.txt đã được đọc thành công với nội dung bắt đầu bằng 'FACT_E04_HEAD' và kết thúc bằng 'FACT_E04_TAIL'.",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 4,
+        "prompt_tokens": 3536,
+        "completion_tokens": 281,
+        "total_tokens": 3817,
+        "cost_usd": 0.001763
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 4,
+      "calls_by_purpose": {
+        "agent_action": 4
+      },
+      "schema_instruction_chars": 5364,
+      "sum_application_chars": 13881,
+      "peak_application_chars": 7855,
+      "tool_executions": 3,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null
+      ],
+      "elapsed_ms": 28786,
+      "evidence_available_last_call": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1599,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 1897,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 2530,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7855,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": true,
+            "FACT_E04_TAIL": true,
+            "e04.txt": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-04",
+      "rubric_id": "E-04",
+      "strategy": "sprint3",
+      "answer": "Đã đọc thành công nội dung file e04.txt với kết quả: FACT_E04_HEAD ... FACT_E04_TAIL",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 4,
+        "prompt_tokens": 3548,
+        "completion_tokens": 298,
+        "total_tokens": 3846,
+        "cost_usd": 0.001809
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 4,
+      "calls_by_purpose": {
+        "agent_action": 4
+      },
+      "schema_instruction_chars": 5364,
+      "sum_application_chars": 11305,
+      "peak_application_chars": 4491,
+      "tool_executions": 3,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null
+      ],
+      "elapsed_ms": 29481,
+      "evidence_available_last_call": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1599,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 2225,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 2990,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 4491,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": true,
+            "FACT_E04_TAIL": true,
+            "e04.txt": true
+          }
+        }
+      ],
+      "repeat": 0
+    }
+  ]
+}
