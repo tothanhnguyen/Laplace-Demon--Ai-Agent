@@ -1,0 +1,100 @@
+\documentclass[12pt,a4paper]{article}
+
+% Chọn XeLaTeX làm compiler trên Overleaf.
+\usepackage{fontspec}
+\setmainfont{TeX Gyre Termes}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{array}
+\usepackage{enumitem}
+
+\setlength{\parindent}{0pt}
+\setlist[itemize]{leftmargin=1.5em, itemsep=0.4em}
+
+\begin{document}
+
+\begin{center}
+    {\Large\textbf{BÁO CÁO TIẾN ĐỘ SPRINT 1}}\\[0.5em]
+    \textit{Thời gian thực hiện: 17/08/2026 -- 30/08/2026}
+\end{center}
+
+\vspace{1em}
+
+\begin{tabular}{@{}>{\bfseries}p{4cm}p{10cm}@{}}
+Nhóm:           & \rule{3cm}{0.4pt} \\[0.6em]
+Thành viên:     & Tô Thành Nguyên -- 24521207 \\[0.6em]
+Ngày báo cáo:   & 30/08/2026
+\end{tabular}
+
+\vspace{1.5em}
+
+\section*{1. Những nội dung đã làm trong 2 tuần qua}
+
+\subsection*{Tô Thành Nguyên -- 24521207}
+
+\begin{itemize}
+    \item Khởi tạo dự án Python, yêu cầu phiên bản Python từ 3.11 trở lên và tổ chức package \texttt{laplace}.
+
+    \item Xây dựng lớp cấu hình ứng dụng bằng \texttt{pydantic-settings}, sử dụng tiền tố biến môi trường \texttt{LAPLACE\_}.
+
+    \item Tạo tệp cấu hình mẫu \texttt{.env.example} và bổ sung quy tắc loại trừ các tệp chứa thông tin nhạy cảm.
+
+    \item Tạo entrypoint \texttt{python -m laplace}, hỗ trợ kiểm tra trạng thái môi trường và chạy nhiệm vụ mẫu từ dòng lệnh.
+
+    \item Xây dựng vòng lặp Agent tuần tự cho nhiệm vụ mẫu, có giới hạn số bước để tránh chạy vô hạn.
+
+    \item Bổ sung các trạng thái kết thúc gồm \texttt{completed}, \texttt{failed} và \texttt{step\_limit}.
+
+    \item Bổ sung lý do kết thúc bằng tiếng Việt cho từng trạng thái của Agent.
+
+    \item Kiểm tra dữ liệu đầu vào sai định dạng tại domain boundary và dừng ngay khi một bước thực thi thất bại.
+
+    \item Thiết lập kiểm thử tự động bằng \texttt{pytest} và kiểm tra chất lượng mã nguồn bằng Ruff.
+
+    \item Thiết lập GitHub Actions để chạy kiểm thử trên Python 3.11 và Python 3.12.
+
+    \item Cập nhật README với hướng dẫn cài đặt môi trường, chạy chương trình và kiểm tra chất lượng mã nguồn.
+
+    \item Kết quả tại checkpoint cuối Sprint 1: Ruff đạt, 13 bài kiểm thử đạt, CLI mặc định và CLI nhiệm vụ mẫu chạy thành công.
+\end{itemize}
+
+\section*{2. Những nội dung sẽ làm trong 2 tuần tới}
+
+\subsection*{Tô Thành Nguyên -- 24521207}
+
+\begin{itemize}
+    \item Hoàn thiện lớp lưu trữ dữ liệu bằng SQLAlchemy 2.0 và SQLite.
+
+    \item Xây dựng các bảng chính gồm người dùng, hội thoại, tin nhắn, tác vụ, bước thực thi, lời gọi công cụ, lời gọi mô hình và trace.
+
+    \item Hoàn thiện nhật ký từng bước của Agent để lưu quyết định, công cụ được sử dụng, kết quả và lý do dừng.
+
+    \item Xây dựng Telegram Bot bằng aiogram 3.x với các lệnh cơ bản, xử lý tin nhắn và tệp đính kèm.
+
+    \item Gắn người dùng Telegram với phiên làm việc riêng và kiểm tra dữ liệu của các người dùng không bị lẫn với nhau.
+
+    \item Xử lý phản hồi dài, trạng thái đang xử lý, cập nhật tiến độ từng bước và yêu cầu hủy lượt đang chạy.
+
+    \item Cài đặt giới hạn tần suất yêu cầu theo từng người dùng.
+
+    \item Kết nối mô hình ngôn ngữ thật và cho phép thay đổi Gemini, OpenAI hoặc Groq bằng cấu hình.
+
+    \item Ghi nhận lượng token, chi phí và độ trễ của từng lời gọi mô hình.
+
+    \item Xây dựng system prompt, schema hành động và kiểm tra tham số công cụ bằng Pydantic.
+
+    \item Thực hiện kiểm thử toàn tuyến từ Telegram đến mô hình ngôn ngữ và phản hồi cho người dùng.
+\end{itemize}
+
+\section*{3. Những trở ngại}
+
+\begin{itemize}
+    \item Lớp lưu trữ dữ liệu và chức năng trace chưa hoàn tất trong Sprint 1 nên phải chuyển sang đầu Sprint 2.
+
+    \item Cần Telegram Bot Token và API key của nhà cung cấp mô hình để thực hiện kiểm thử với dịch vụ thật.
+
+    \item Các bài kiểm thử hiện tại chủ yếu sử dụng dữ liệu giả lập, chưa thay thế được việc kiểm tra toàn tuyến với Telegram và mô hình thật.
+
+    \item Cần bảo đảm thông tin nhạy cảm trong tệp \texttt{.env} không bị đưa lên repository công khai.
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,1695 @@
+{
+  "schema_version": 2,
+  "mode": "live",
+  "requested_provider": "router9",
+  "resolved_provider": "router9",
+  "models": [
+    "gpt-5.6-sol"
+  ],
+  "python": "3.14.6",
+  "strategies": [
+    "full",
+    "window10",
+    "sprint3"
+  ],
+  "repeat": 1,
+  "started_at": "2026-09-16T14:10:51.390466+00:00",
+  "finished_at": "2026-09-16T14:19:03.346548+00:00",
+  "code_revision": "cc9568936a7b1d09a4a4545e923eef5558da8343",
+  "source_sha256": "03622b63767c475ca15a6397f20a5d84aa1883c9f5a75cced768f2aeef06db75",
+  "working_tree_dirty": true,
+  "fixture_sha256": "6b7466870a0ddb2f8211fd90b15c3df9f98e3ca6c351dabbf2b0b3db188dbe63",
+  "parameters": {
+    "context_max_chars": 12000,
+    "case_count": 8
+  },
+  "requested_cases": [
+    "E-01",
+    "E-04",
+    "E-08"
+  ],
+  "expected_result_count": 9,
+  "completed_result_count": 9,
+  "incomplete": false,
+  "limits": {
+    "max_calls": 250,
+    "stop_after_observed_usd": 0.0,
+    "pacing_seconds": 0.2,
+    "limit_hit": false,
+    "stop_reason": null,
+    "transient_retries": 0
+  },
+  "aggregate": {
+    "full": {
+      "completed_cases": 3,
+      "successes": 3,
+      "unsupported_claims": 0,
+      "total_tokens": 117300,
+      "estimated_usd": 0.0
+    },
+    "window10": {
+      "completed_cases": 3,
+      "successes": 2,
+      "unsupported_claims": 0,
+      "total_tokens": 55713,
+      "estimated_usd": 0.0
+    },
+    "sprint3": {
+      "completed_cases": 3,
+      "successes": 3,
+      "unsupported_claims": 0,
+      "total_tokens": 71889,
+      "estimated_usd": 0.0
+    }
+  },
+  "results": [
+    {
+      "case_id": "E-01",
+      "rubric_id": "E-01",
+      "strategy": "full",
+      "answer": "FACT_E01_ALPHA",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E01_ALPHA": true
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 13,
+        "prompt_tokens": 27376,
+        "completion_tokens": 377,
+        "total_tokens": 27753,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 13,
+      "calls_by_purpose": {
+        "agent_action": 12,
+        "schema_retry": 1
+      },
+      "schema_instruction_chars": 17433,
+      "sum_application_chars": 123657,
+      "peak_application_chars": 15712,
+      "tool_executions": 0,
+      "schema_retries": 1,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "elapsed_ms": 37673,
+      "evidence_available_last_call": {
+        "FACT_E01_ALPHA": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1612,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 3026,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 4426,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 5826,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7226,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8626,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 10026,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 11426,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 12826,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "schema_retry",
+          "char_count": 12965,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 14280,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 15680,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 15712,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-01",
+      "rubric_id": "E-01",
+      "strategy": "window10",
+      "answer": "Mã đã lưu là **FACT_E01_ALPHA**.",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E01_ALPHA": true
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 12,
+        "prompt_tokens": 18173,
+        "completion_tokens": 454,
+        "total_tokens": 18627,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 12,
+      "calls_by_purpose": {
+        "agent_action": 12
+      },
+      "schema_instruction_chars": 16092,
+      "sum_application_chars": 81944,
+      "peak_application_chars": 8721,
+      "tool_executions": 0,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "elapsed_ms": 40784,
+      "evidence_available_last_call": {
+        "FACT_E01_ALPHA": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1612,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 3026,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 4453,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 5880,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7307,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8708,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8721,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8721,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8721,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8721,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8721,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7353,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-01",
+      "rubric_id": "E-01",
+      "strategy": "sprint3",
+      "answer": "Mã đã lưu là **FACT_E01_ALPHA**.",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E01_ALPHA": true
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 13,
+        "prompt_tokens": 21547,
+        "completion_tokens": 668,
+        "total_tokens": 22215,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 13,
+      "calls_by_purpose": {
+        "agent_action": 12,
+        "compact": 1
+      },
+      "schema_instruction_chars": 17238,
+      "sum_application_chars": 96972,
+      "peak_application_chars": 11964,
+      "tool_executions": 0,
+      "schema_retries": 0,
+      "compaction_count": 1,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        8,
+        8,
+        8,
+        8
+      ],
+      "elapsed_ms": 47359,
+      "evidence_available_last_call": {
+        "FACT_E01_ALPHA": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1612,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 3026,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 4453,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 5880,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7307,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8734,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 10161,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 11588,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "compact",
+          "char_count": 783,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 9070,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 10497,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 11897,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 11964,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E01_ALPHA": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-04",
+      "rubric_id": "E-04",
+      "strategy": "full",
+      "answer": "Đã đọc `e04.txt`: file bắt đầu bằng `FACT_E04_HEAD`, tiếp theo là một chuỗi rất dài ký tự `x`, và kết thúc bằng `FACT_E04_TAIL`.",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 2,
+        "prompt_tokens": 1505,
+        "completion_tokens": 181,
+        "total_tokens": 1686,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 2,
+      "calls_by_purpose": {
+        "agent_action": 2
+      },
+      "schema_instruction_chars": 2682,
+      "sum_application_chars": 8398,
+      "peak_application_chars": 6799,
+      "tool_executions": 1,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null
+      ],
+      "elapsed_ms": 8634,
+      "evidence_available_last_call": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1599,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 6799,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": true,
+            "FACT_E04_TAIL": true,
+            "e04.txt": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-04",
+      "rubric_id": "E-04",
+      "strategy": "window10",
+      "answer": "Nội dung `e04.txt`: bắt đầu bằng `FACT_E04_HEAD`, tiếp theo là một chuỗi rất dài ký tự `x`, và kết thúc bằng `FACT_E04_TAIL`.",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 2,
+        "prompt_tokens": 1505,
+        "completion_tokens": 180,
+        "total_tokens": 1685,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 2,
+      "calls_by_purpose": {
+        "agent_action": 2
+      },
+      "schema_instruction_chars": 2682,
+      "sum_application_chars": 8398,
+      "peak_application_chars": 6799,
+      "tool_executions": 1,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null
+      ],
+      "elapsed_ms": 8377,
+      "evidence_available_last_call": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1599,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 6799,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": true,
+            "FACT_E04_TAIL": true,
+            "e04.txt": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-04",
+      "rubric_id": "E-04",
+      "strategy": "sprint3",
+      "answer": "Nội dung `e04.txt` có 4.928 ký tự, theo cấu trúc:\n\n`FACT_E04_HEAD`\n\n tiếp theo là **4.900 ký tự `x`**, rồi:\n\n`FACT_E04_TAIL`\n\nTool đã lược phần lặp ở giữa khi hiển thị.",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "associations": {},
+      "forbidden": {},
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 2,
+        "prompt_tokens": 1170,
+        "completion_tokens": 657,
+        "total_tokens": 1827,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 2,
+      "calls_by_purpose": {
+        "agent_action": 2
+      },
+      "schema_instruction_chars": 2682,
+      "sum_application_chars": 4899,
+      "peak_application_chars": 3300,
+      "tool_executions": 1,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null
+      ],
+      "elapsed_ms": 21996,
+      "evidence_available_last_call": {
+        "FACT_E04_HEAD": true,
+        "FACT_E04_TAIL": true,
+        "e04.txt": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1599,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": false,
+            "FACT_E04_TAIL": false,
+            "e04.txt": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 3300,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E04_HEAD": true,
+            "FACT_E04_TAIL": true,
+            "e04.txt": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-08",
+      "rubric_id": "E-08",
+      "strategy": "full",
+      "answer": "Quyết định hiện tại: FACT_E08_NEW. Lý do: REASON_E08_NEW. Nguồn: SOURCE_E08.",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E08_NEW": true,
+        "REASON_E08_NEW": true,
+        "SOURCE_E08": true
+      },
+      "associations": {},
+      "forbidden": {
+        "FACT_E08_OLD": false,
+        "REASON_E08_OLD": false
+      },
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 25,
+        "prompt_tokens": 86868,
+        "completion_tokens": 993,
+        "total_tokens": 87861,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 25,
+      "calls_by_purpose": {
+        "agent_action": 21,
+        "schema_retry": 4
+      },
+      "schema_instruction_chars": 33525,
+      "sum_application_chars": 393221,
+      "peak_application_chars": 27441,
+      "tool_executions": 0,
+      "schema_retries": 4,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "elapsed_ms": 88920,
+      "evidence_available_last_call": {
+        "FACT_E08_NEW": true,
+        "REASON_E08_NEW": true,
+        "SOURCE_E08": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1628,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 3079,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 4490,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 5901,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7312,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8723,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 10134,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 11545,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "schema_retry",
+          "char_count": 11695,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 12995,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 13081,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 14585,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 15998,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 17411,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 18824,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 20237,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "schema_retry",
+          "char_count": 20388,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 21688,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "schema_retry",
+          "char_count": 21839,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 23101,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "schema_retry",
+          "char_count": 23252,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 24545,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 25958,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 27371,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 27441,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-08",
+      "rubric_id": "E-08",
+      "strategy": "window10",
+      "answer": "Quyết định hiện tại: bỏ qua các mục Nhiễu 16–20.\nLý do: chúng được ghi rõ là “nội dung không liên quan” và không chứa yêu cầu hay dữ kiện cần xử lý.\nNguồn: các tin nhắn Nhiễu 16–20 trong cuộc trò chuyện này. Chưa có quyết định nội dung nào khác được cung cấp.",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": false,
+      "expected": {
+        "FACT_E08_NEW": false,
+        "REASON_E08_NEW": false,
+        "SOURCE_E08": false
+      },
+      "associations": {},
+      "forbidden": {
+        "FACT_E08_OLD": false,
+        "REASON_E08_OLD": false
+      },
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 21,
+        "prompt_tokens": 34333,
+        "completion_tokens": 1068,
+        "total_tokens": 35401,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 21,
+      "calls_by_purpose": {
+        "agent_action": 21
+      },
+      "schema_instruction_chars": 28161,
+      "sum_application_chars": 153788,
+      "peak_application_chars": 8735,
+      "tool_executions": 0,
+      "schema_retries": 0,
+      "compaction_count": 0,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "elapsed_ms": 80678,
+      "evidence_available_last_call": {
+        "FACT_E08_NEW": false,
+        "REASON_E08_NEW": false,
+        "SOURCE_E08": false
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1628,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 3067,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 4488,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 5909,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7330,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8709,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8691,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8691,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8691,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7366,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7402,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7404,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7406,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7408,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8735,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8701,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8701,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8701,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8701,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8701,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7358,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        }
+      ],
+      "repeat": 0
+    },
+    {
+      "case_id": "E-08",
+      "rubric_id": "E-08",
+      "strategy": "sprint3",
+      "answer": "Quyết định hiện tại: **FACT_E08_NEW**.\nLý do: **REASON_E08_NEW**.\nNguồn: **SOURCE_E08**.",
+      "error": null,
+      "runtime_status": "completed",
+      "stop_reason": "final",
+      "task_success": true,
+      "expected": {
+        "FACT_E08_NEW": true,
+        "REASON_E08_NEW": true,
+        "SOURCE_E08": true
+      },
+      "associations": {},
+      "forbidden": {
+        "FACT_E08_OLD": false,
+        "REASON_E08_OLD": false
+      },
+      "abstained": false,
+      "unsupported_claim": false,
+      "usage": {
+        "llm_calls": 26,
+        "prompt_tokens": 44155,
+        "completion_tokens": 3692,
+        "total_tokens": 47847,
+        "cost_usd": 0.0
+      },
+      "usage_provenance": "provider_response+laplace.llm.presets",
+      "logical_calls": 26,
+      "calls_by_purpose": {
+        "agent_action": 21,
+        "compact": 5
+      },
+      "schema_instruction_chars": 33891,
+      "sum_application_chars": 190959,
+      "peak_application_chars": 11371,
+      "tool_executions": 0,
+      "schema_retries": 0,
+      "compaction_count": 5,
+      "truncation_events": 0,
+      "watermark_progression": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        6,
+        6,
+        6,
+        12,
+        12,
+        12,
+        18,
+        18,
+        18,
+        24,
+        24,
+        28,
+        28,
+        28
+      ],
+      "elapsed_ms": 157413,
+      "evidence_available_last_call": {
+        "FACT_E08_NEW": true,
+        "REASON_E08_NEW": true,
+        "SOURCE_E08": true
+      },
+      "calls": [
+        {
+          "purpose": "agent_action",
+          "char_count": 1628,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 3137,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 4628,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 6084,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 7570,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 9052,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 10545,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "compact",
+          "char_count": 864,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 9573,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 11024,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 11150,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "compact",
+          "char_count": 1228,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8346,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 9857,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 11368,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "compact",
+          "char_count": 1341,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": false,
+            "REASON_E08_NEW": false,
+            "SOURCE_E08": false
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 8349,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 9860,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 11371,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "compact",
+          "char_count": 1442,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 9332,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 10843,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "compact",
+          "char_count": 776,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 9477,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 10978,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        },
+        {
+          "purpose": "agent_action",
+          "char_count": 11136,
+          "dropped_group_count": 0,
+          "evidence_available": {
+            "FACT_E08_NEW": true,
+            "REASON_E08_NEW": true,
+            "SOURCE_E08": true
+          }
+        }
+      ],
+      "repeat": 0
+    }
+  ]
+}
