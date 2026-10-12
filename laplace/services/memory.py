@@ -77,16 +77,19 @@ def forget_memory(telegram_user_id: int) -> tuple[str, dict | None]:
     if lease is None:
         return "busy", None
     try:
-        with session_scope() as session:
-            user = repo.find_user(session, telegram_user_id)
-            if user is None:
-                return "empty", None
-            before = repo.user_usage(session, user)
-            result = repo.wipe_session(session, user)
-            after = repo.user_usage(session, user)
-            if before != after:
-                raise RuntimeError("Usage thay đổi trong khi xóa memory")
-            result["usage_llm_calls"] = after["llm_calls"]
-            return "deleted", result
+        try:
+            with session_scope() as session:
+                user = repo.find_user(session, telegram_user_id)
+                if user is None:
+                    return "empty", None
+                before = repo.user_usage(session, user)
+                result = repo.wipe_session(session, user)
+                after = repo.user_usage(session, user)
+                if before != after:
+                    raise RuntimeError("Usage thay đổi trong khi xóa memory")
+                result["usage_llm_calls"] = after["llm_calls"]
+                return "deleted", result
+        except repo.ReminderDeliveryInProgress:
+            return "delivery_busy", None
     finally:
         release_turn(lease)

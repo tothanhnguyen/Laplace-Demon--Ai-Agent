@@ -10,6 +10,8 @@ _SETTING_KEYS = (
     "LAPLACE_APP_NAME",
     "LAPLACE_ENVIRONMENT",
     "LAPLACE_LOG_LEVEL",
+    "LAPLACE_TIMEZONE",
+    "LAPLACE_DOCUMENT_MAX_BYTES",
 )
 
 
@@ -22,6 +24,8 @@ def test_settings_use_defaults(monkeypatch) -> None:
     assert settings.app_name == "Laplace's Demon"
     assert settings.environment == "development"
     assert settings.log_level == "INFO"
+    assert settings.timezone == "Asia/Ho_Chi_Minh"
+    assert settings.document_max_bytes == 10 * 1024 * 1024
 
 
 def test_settings_read_environment_overrides(monkeypatch) -> None:

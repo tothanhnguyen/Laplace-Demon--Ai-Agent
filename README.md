@@ -1,8 +1,9 @@
 # Laplace's Demon
 
 AI Agent cá nhân giao tiếp qua Telegram, phát triển theo từng sprint.
-Sprint 3 đã hoàn tất: context ba tầng có ngân sách, task card theo bước,
-rolling session memory, quản lý bộ nhớ theo user và thực nghiệm live schema v2.
+Sprint 4 bổ sung tool contracts strict, Tavily Search/Extract có citation,
+đọc TXT/PDF/DOCX theo locator và reminder một lần có persistence/recovery.
+Identity, destination, timezone và attachment paths chỉ đến từ trusted runtime context.
 
 ## Yêu cầu
 
@@ -33,6 +34,26 @@ Các biến đều có tiền tố `LAPLACE_` (đặt trong `.env`):
 | `LAPLACE_DATABASE_URL` | `sqlite:///laplace.db` | Nơi lưu phiên, tin nhắn, log LLM/tool/trace |
 | `LAPLACE_TELEGRAM_BOT_TOKEN` | (trống) | Token bot từ @BotFather |
 | `LAPLACE_CONTEXT_MAX_CHARS` | `12000` | Ngân sách ký tự messages do ứng dụng dựng; không phải hard token limit |
+| `LAPLACE_TAVILY_API_KEY` | (trống) | Key Tavily cho Web Search/Extract |
+| `LAPLACE_HTTP_TIMEOUT_SECONDS` | `10` | Timeout HTTP tối đa cho tool web |
+| `LAPLACE_WEB_MAX_RESULTS` | `5` | Số kết quả web tối đa mỗi lần tìm |
+| `LAPLACE_WEB_MAX_CHUNKS` | `3` | Số đoạn evidence tối đa mỗi nguồn |
+| `LAPLACE_DOCUMENT_MAX_BYTES` | `10485760` | Trần upload tài liệu 10 MiB |
+| `LAPLACE_DOCUMENT_MAX_UNITS` | `200` | Số đơn vị tài liệu tối đa được index |
+| `LAPLACE_DOCUMENT_UNIT_MAX_CHARS` | `4000` | Trần ký tự mỗi đơn vị tài liệu |
+| `LAPLACE_DOCUMENT_FULL_SUMMARY_MAX_CHARS` | `4000` | Ngân sách text mỗi lượt đọc |
+| `LAPLACE_DOCUMENT_PARSE_TIMEOUT_SECONDS` | `10` | Timeout parser PDF/DOCX subprocess |
+| `LAPLACE_DOCUMENT_PARSER_MEMORY_MB` | `256` | Giới hạn memory parser trên POSIX |
+| `LAPLACE_DOCUMENT_MAX_EXPANDED_BYTES` | `52428800` | Trần expanded bytes cho DOCX ZIP |
+| `LAPLACE_DOCUMENT_MAX_ZIP_ENTRIES` | `1000` | Trần số ZIP entries của DOCX |
+| `LAPLACE_TIMEZONE` | `Asia/Ho_Chi_Minh` | IANA timezone dùng để hiểu lịch reminder |
+| `LAPLACE_REMINDER_SCAN_INTERVAL_SECONDS` | `1` | Chu kỳ quét reminder đến hạn |
+| `LAPLACE_REMINDER_MISFIRE_GRACE_SECONDS` | `3600` | Grace phục hồi reminder sau restart |
+| `LAPLACE_REMINDER_MAX_HORIZON_DAYS` | `365` | Khoảng đặt reminder tối đa |
+| `LAPLACE_REMINDER_MAX_ATTEMPTS` | `3` | Số lần delivery tối đa |
+| `LAPLACE_REMINDER_SEND_TIMEOUT_SECONDS` | `10` | Timeout một lần gửi Telegram |
+| `LAPLACE_REMINDER_BATCH_SIZE` | `25` | Số reminder tối đa mỗi lượt quét |
+| `LAPLACE_REMINDER_MAX_CONCURRENCY` | `5` | Số delivery đồng thời tối đa |
 
 Đổi nhà cung cấp mô hình chỉ cần sửa `.env`, không sửa mã nguồn. Thiếu key thì
 chương trình báo đúng trang lấy key của hãng tương ứng.
@@ -71,10 +92,22 @@ python -m laplace --bot
 ```
 
 Lệnh bot: `/start`, `/help`, `/status` (usage + chi phí), `/memory` (xem
-memory trong private chat), `/forget` và `/forget confirm` (xóa memory có
-liên kết nhưng giữ usage), `/cancel` (cooperative cancellation). Bot nhận tệp
-đính kèm, hiển thị task card theo bước, chia phản hồi quá 4096 ký tự và giới
-hạn 5 yêu cầu/phút mỗi user.
+memory và reminder trong private chat), `/forget` và `/forget confirm` (xóa
+memory/reminder có liên kết nhưng giữ usage), `/cancel` (cooperative cancellation).
+Bot đọc TXT/PDF/DOCX tối đa 10 MiB, gọi Tavily khi cần dữ liệu web có nguồn,
+hiển thị task card theo bước và chia phản hồi quá 4096 ký tự.
+
+Web provider decision: Sprint 4 dùng trực tiếp Tavily Search + Extract REST.
+Không cache, không local full-page fetch và không browser fallback; URL nguồn
+thành công duy nhất mới được đưa vào `sources`.
+
+Reminder chỉ nhận capability từ directive rõ ràng trong message Telegram private:
+`/remind`, `/remind_update`, `/remind_cancel` (directive nhiều bước đặt sau `;`).
+Web/document tool data hoặc câu văn chỉ nhắc đến reminder không thể tự cấp
+capability này. Delivery dùng
+at-least-once với retry hữu hạn và stable reminder ID: Telegram không có
+idempotency key nên lỗi/crash mơ hồ có thể tạo bản gửi trùng; hệ thống không
+tuyên bố exactly-once.
 
 ## Chạy một lượt chat qua CLI
 
@@ -94,7 +127,7 @@ python -m laplace --sample-agent
 Kết quả gồm `status` (`completed` / `failed` / `step_limit`) và
 `completion_reason` giải thích lý do dừng.
 
-## Kiến trúc (Sprint 3)
+## Kiến trúc (Sprint 4 — Phase 1)
 
 - `laplace/context.py` — context ba tầng, char budget, bounded tool observation,
   task card và rolling-summary schema.
@@ -103,14 +136,16 @@ Kết quả gồm `status` (`completed` / `failed` / `step_limit`) và
 - `laplace/services/memory.py` — một worker process-local mỗi user,
   cooperative cancellation, memory snapshot và atomic forget.
 - `laplace/llm/` — provider OpenAI-compatible, retry 429, usage/cost và mock offline.
-- `laplace/tools/` — registry + Pydantic params; `read_file` là tool mẫu.
+- `laplace/tools/` — registry strict với input/output schema, trusted context,
+  structured failure và source metadata; tool theo nghiệp vụ được thêm từ Sprint 4.
 - `laplace/models.py`, `laplace/db.py`, `laplace/repo.py` — SQLAlchemy/SQLite,
   migration additive, FK checks và child-first deletion.
 - `laplace/bot/` — aiogram 3, private memory commands, tiến độ realtime,
   rate limit và phản hồi dài.
 
-Forget không xóa file upload, Telegram/provider retention, backup hoặc usage.
-Tool logs Sprint 2 chưa có owner được giữ vì không thể xóa an toàn theo user.
+Tệp upload tạm được xóa ngay sau lượt document và không thuộc memory.
+Forget không xóa lịch sử Telegram/provider, backup hoặc usage. Tool logs Sprint 2
+chưa có owner được giữ vì không thể xóa an toàn theo user.
 Chi tiết và cách chạy thực nghiệm: `docs/huong-dan-nguyen-ly-sprint-3.md`.
 
 ## So sánh context offline

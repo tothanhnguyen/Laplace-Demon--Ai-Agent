@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.orm import Session
@@ -12,6 +14,7 @@ from laplace.models import (
     Conversation,
     LLMCall,
     Message,
+    Reminder,
     Step,
     Task,
     ToolCall,
@@ -21,6 +24,10 @@ from laplace.models import (
 )
 
 DB_EXCERPT_CHARS = 1_200
+
+
+class ReminderDeliveryInProgress(RuntimeError):
+    """Raised when memory deletion races an already claimed delivery."""
 
 
 def find_user(session: Session, telegram_user_id: int) -> User | None:
@@ -63,9 +70,7 @@ def add_message(session: Session, conversation: Conversation, role: str, content
     return message
 
 
-def recent_messages(
-    session: Session, conversation: Conversation, limit: int = 10
-) -> list[Message]:
+def recent_messages(session: Session, conversation: Conversation, limit: int = 10) -> list[Message]:
     """Trả tối đa limit message mới nhất theo thứ tự tăng dần."""
     rows = session.scalars(
         select(Message)
@@ -235,6 +240,7 @@ def close_task(session: Session, task_id: int, status: str) -> None:
         .values(status=status, updated_at=utcnow())
     )
 
+
 def task_snapshot(session: Session, task_id: int) -> dict[str, Any]:
     """Tạo plain snapshot cho context/progress từ dữ liệu đã ghi."""
     task = session.get(Task, task_id)
@@ -293,22 +299,41 @@ def task_snapshot(session: Session, task_id: int) -> dict[str, Any]:
         "criteria": criteria,
         "remaining": remaining,
     }
+
+
 def tool_rows_for_request_ids(
     session: Session, request_message_ids: list[int]
 ) -> list[dict[str, Any]]:
-    """Read bounded tool projections without materializing full result payloads."""
+    """Read bounded canonical tool projections without loading full payloads."""
+
     if not request_message_ids:
         return []
+    valid_json = func.json_valid(ToolCall.result_json) == 1
+    sources_json = case(
+        (valid_json, func.coalesce(func.json_extract(ToolCall.result_json, "$.sources"), "[]")),
+        else_="[]",
+    )
+    data_json = case(
+        (
+            valid_json,
+            func.coalesce(
+                func.json_extract(ToolCall.result_json, "$.data"),
+                func.json_extract(ToolCall.result_json, "$.payload"),
+                "",
+            ),
+        ),
+        else_="",
+    )
     rows = session.execute(
         select(
             ToolCall.id,
             Task.request_message_id,
             ToolCall.tool_name,
             ToolCall.ok,
-            ToolCall.params_json,
-            func.length(ToolCall.result_json),
-            func.substr(ToolCall.result_json, 1, DB_EXCERPT_CHARS),
-            func.substr(ToolCall.result_json, -DB_EXCERPT_CHARS),
+            sources_json,
+            func.length(data_json),
+            func.substr(data_json, 1, DB_EXCERPT_CHARS),
+            func.substr(data_json, -DB_EXCERPT_CHARS),
         )
         .join(Task, ToolCall.task_id == Task.id)
         .where(Task.request_message_id.in_(request_message_ids))
@@ -320,48 +345,36 @@ def tool_rows_for_request_ids(
         request_id,
         tool_name,
         ok,
-        params_json,
-        result_chars,
-        result_prefix,
-        result_suffix,
+        raw_sources,
+        data_chars,
+        data_prefix,
+        data_suffix,
     ) in rows:
         try:
-            params = json.loads(params_json)
+            decoded_sources = json.loads(raw_sources or "[]")
         except (TypeError, json.JSONDecodeError):
-            params = {}
-        if not isinstance(params, dict):
-            params = {}
-        total_chars = int(result_chars or 0)
-        stored_text = _bounded_db_excerpt(
-            result_prefix,
-            result_suffix,
-            total_chars,
+            decoded_sources = []
+        sources = (
+            [str(source) for source in decoded_sources if str(source).strip()]
+            if isinstance(decoded_sources, list)
+            else []
         )
-        stored: dict[str, Any] = {}
-        if total_chars <= DB_EXCERPT_CHARS:
-            try:
-                decoded = json.loads(stored_text)
-            except (TypeError, json.JSONDecodeError):
-                decoded = {}
-            if isinstance(decoded, dict):
-                stored = decoded
+        total_chars = int(data_chars or 0)
         result.append(
             {
                 "id": call_id,
                 "request_message_id": request_id,
                 "tool_name": tool_name,
                 "ok": ok,
-                "source": params.get("path"),
-                "payload": (
-                    stored.get("payload", "")
-                    if total_chars <= DB_EXCERPT_CHARS
-                    else stored_text
+                "sources": sources,
+                "payload": _bounded_db_excerpt(
+                    data_prefix,
+                    data_suffix,
+                    total_chars,
                 ),
             }
         )
     return result
-
-
 
 
 def record_llm_call(
@@ -480,8 +493,255 @@ def user_usage(session: Session, user: User) -> dict[str, Any]:
     }
 
 
+def create_reminder(
+    session: Session,
+    *,
+    user_id: int,
+    message: str,
+    timezone: str,
+    due_at_utc: int,
+) -> Reminder:
+    """Create one owner-linked pending reminder."""
+    reminder = Reminder(
+        user_id=user_id,
+        message=message,
+        timezone=timezone,
+        due_at_utc=due_at_utc,
+        next_attempt_at_utc=due_at_utc,
+        status="pending",
+    )
+    session.add(reminder)
+    session.flush()
+    return reminder
+
+
+def reminder_for_owner(session: Session, user_id: int, reminder_id: int) -> Reminder | None:
+    """Return a reminder only when it belongs to the trusted owner."""
+    return session.scalar(
+        select(Reminder).where(Reminder.id == reminder_id, Reminder.user_id == user_id)
+    )
+
+
+def update_pending_reminder(
+    session: Session,
+    *,
+    user_id: int,
+    reminder_id: int,
+    message: str | None,
+    due_at_utc: int | None,
+    timezone: str,
+) -> Reminder | None:
+    values: dict[str, Any] = {"updated_at": utcnow()}
+    if message is not None:
+        values["message"] = message
+    if due_at_utc is None:
+        allowed_statuses = ("pending",)
+    else:
+        allowed_statuses = ("pending", "failed", "delivery_unknown")
+        values.update(
+            due_at_utc=due_at_utc,
+            next_attempt_at_utc=due_at_utc,
+            timezone=timezone,
+            status="pending",
+            attempt_count=0,
+            first_attempt_at_utc=None,
+            last_attempt_at_utc=None,
+            sent_at_utc=None,
+            telegram_message_id=None,
+            last_error=None,
+        )
+    result = session.execute(
+        update(Reminder)
+        .where(
+            Reminder.id == reminder_id,
+            Reminder.user_id == user_id,
+            Reminder.status.in_(allowed_statuses),
+        )
+        .values(**values)
+    )
+    if result.rowcount != 1:
+        return None
+    return reminder_for_owner(session, user_id, reminder_id)
+
+
+def cancel_pending_reminder(session: Session, *, user_id: int, reminder_id: int) -> Reminder | None:
+    result = session.execute(
+        update(Reminder)
+        .where(
+            Reminder.id == reminder_id,
+            Reminder.user_id == user_id,
+            Reminder.status == "pending",
+        )
+        .values(status="cancelled", updated_at=utcnow())
+    )
+    if result.rowcount != 1:
+        return None
+    return reminder_for_owner(session, user_id, reminder_id)
+
+
+def due_reminder_candidates(
+    session: Session,
+    now_utc: int,
+    limit: int,
+    *,
+    after: tuple[int, int] | None = None,
+) -> list[tuple[int, int, int]]:
+    query = (
+        select(Reminder.id, Reminder.next_attempt_at_utc, User.telegram_user_id)
+        .join(User, User.id == Reminder.user_id)
+        .where(
+            Reminder.status == "pending",
+            Reminder.next_attempt_at_utc <= now_utc,
+        )
+    )
+    if after is not None:
+        after_attempt, after_id = after
+        query = query.where(
+            or_(
+                Reminder.next_attempt_at_utc > after_attempt,
+                (Reminder.next_attempt_at_utc == after_attempt) & (Reminder.id > after_id),
+            )
+        )
+    rows = session.execute(
+        query.order_by(Reminder.next_attempt_at_utc, Reminder.id).limit(limit)
+    ).all()
+    return [(int(row[0]), int(row[1]), int(row[2])) for row in rows]
+
+
+def defer_pending_reminder(
+    session: Session,
+    reminder_id: int,
+    *,
+    eligible_at_utc: int,
+    next_attempt_at_utc: int,
+) -> bool:
+    """Move a lease-blocked row behind the current due queue without claiming it."""
+    result = session.execute(
+        update(Reminder)
+        .where(
+            Reminder.id == reminder_id,
+            Reminder.status == "pending",
+            Reminder.next_attempt_at_utc <= eligible_at_utc,
+        )
+        .values(next_attempt_at_utc=next_attempt_at_utc, updated_at=utcnow())
+    )
+    return result.rowcount == 1
+
+
+def claim_reminder(session: Session, reminder_id: int, now_utc: int) -> bool:
+    result = session.execute(
+        update(Reminder)
+        .where(
+            Reminder.id == reminder_id,
+            Reminder.status == "pending",
+            Reminder.next_attempt_at_utc <= now_utc,
+        )
+        .values(
+            status="delivering",
+            attempt_count=Reminder.attempt_count + 1,
+            first_attempt_at_utc=case(
+                (Reminder.first_attempt_at_utc.is_(None), now_utc),
+                else_=Reminder.first_attempt_at_utc,
+            ),
+            last_attempt_at_utc=now_utc,
+            updated_at=utcnow(),
+        )
+    )
+    return result.rowcount == 1
+
+
+def mark_reminder_sent(
+    session: Session,
+    reminder_id: int,
+    *,
+    now_utc: int,
+    telegram_message_id: int,
+) -> bool:
+    result = session.execute(
+        update(Reminder)
+        .where(Reminder.id == reminder_id, Reminder.status == "delivering")
+        .values(
+            status="sent",
+            sent_at_utc=now_utc,
+            telegram_message_id=telegram_message_id,
+            last_error=None,
+            updated_at=utcnow(),
+        )
+    )
+    return result.rowcount == 1
+
+
+def transition_reminder_failure(
+    session: Session,
+    reminder_id: int,
+    *,
+    now_utc: int,
+    error: str,
+    retry_at_utc: int,
+    max_attempts: int,
+    grace_seconds: int,
+    retryable: bool,
+) -> str | None:
+    reminder = session.scalar(
+        select(Reminder).where(
+            Reminder.id == reminder_id,
+            Reminder.status == "delivering",
+        )
+    )
+    if reminder is None:
+        return None
+    within_grace = now_utc <= reminder.due_at_utc + grace_seconds
+    retry = retryable and reminder.attempt_count < max_attempts and within_grace
+    if retry:
+        reminder.status = "pending"
+        reminder.next_attempt_at_utc = min(
+            retry_at_utc,
+            reminder.due_at_utc + grace_seconds,
+        )
+    else:
+        reminder.status = "failed" if not retryable else "delivery_unknown"
+    reminder.last_error = error[:500]
+    reminder.updated_at = utcnow()
+    return reminder.status
+
+
+def recover_stale_reminders(
+    session: Session,
+    now_utc: int,
+    max_attempts: int,
+    grace_seconds: int,
+) -> int:
+    reminders = list(session.scalars(select(Reminder).where(Reminder.status == "delivering")).all())
+    for reminder in reminders:
+        retry = (
+            reminder.attempt_count < max_attempts and now_utc <= reminder.due_at_utc + grace_seconds
+        )
+        reminder.status = "pending" if retry else "delivery_unknown"
+        if retry:
+            reminder.next_attempt_at_utc = now_utc
+        reminder.last_error = "Recovered an interrupted delivery attempt."
+        reminder.updated_at = utcnow()
+    return len(reminders)
+
+
+def mark_missed_reminders(session: Session, cutoff_utc: int) -> int:
+    result = session.execute(
+        update(Reminder)
+        .where(
+            Reminder.status == "pending",
+            Reminder.due_at_utc < cutoff_utc,
+        )
+        .values(
+            status="missed",
+            updated_at=utcnow(),
+            last_error="Reminder expired during downtime.",
+        )
+    )
+    return int(result.rowcount or 0)
+
+
 def session_stats(session: Session, user: User) -> dict[str, Any]:
-    """Đọc thống kê và preview hữu hạn của memory thuộc một user."""
+    """Read bounded owner-scoped memory and reminder previews."""
     conversation_ids = select(Conversation.id).where(Conversation.user_id == user.id)
     task_ids = select(Task.id).where(Task.user_id == user.id)
     latest = session.scalar(
@@ -499,34 +759,60 @@ def session_stats(session: Session, user: User) -> dict[str, Any]:
     last_activity = session.scalar(
         select(func.max(Message.created_at)).where(Message.conversation_id.in_(conversation_ids))
     )
+    recent_reminders = list(
+        session.scalars(
+            select(Reminder)
+            .where(
+                Reminder.user_id == user.id,
+                Reminder.status.in_(("pending", "delivering")),
+            )
+            .order_by(Reminder.due_at_utc, Reminder.id)
+            .limit(3)
+        ).all()
+    )
+    reminder_total = int(
+        session.scalar(select(func.count(Reminder.id)).where(Reminder.user_id == user.id)) or 0
+    )
+    reminder_active = int(
+        session.scalar(
+            select(func.count(Reminder.id)).where(
+                Reminder.user_id == user.id,
+                Reminder.status.in_(("pending", "delivering")),
+            )
+        )
+        or 0
+    )
     task_previews = []
     for row in recent_tasks:
         calls = session.scalars(
-            select(ToolCall)
-            .where(ToolCall.task_id == row.id)
-            .order_by(ToolCall.id.desc())
-            .limit(2)
+            select(ToolCall).where(ToolCall.task_id == row.id).order_by(ToolCall.id.desc()).limit(2)
         ).all()
         tools = []
         for call in calls:
             try:
-                payload_data = json.loads(call.result_json)
+                envelope = json.loads(call.result_json)
             except (TypeError, json.JSONDecodeError):
-                payload_data = {}
-            if not isinstance(payload_data, dict):
-                payload_data = {}
-            try:
-                params_data = json.loads(call.params_json)
-            except (TypeError, json.JSONDecodeError):
-                params_data = {}
-            if not isinstance(params_data, dict):
-                params_data = {}
+                envelope = {}
+            if not isinstance(envelope, dict):
+                envelope = {}
+            raw_sources = envelope.get("sources")
+            sources = (
+                [str(source)[:200] for source in raw_sources if str(source).strip()]
+                if isinstance(raw_sources, list)
+                else []
+            )
+            data = envelope.get("data", envelope.get("payload", ""))
+            result_preview = (
+                data
+                if isinstance(data, str)
+                else json.dumps(data, ensure_ascii=False, sort_keys=True)
+            )
             tools.append(
                 {
                     "name": call.tool_name,
                     "ok": call.ok,
-                    "source": str(params_data.get("path") or "")[:200],
-                    "result": str(payload_data.get("payload", ""))[:200],
+                    "sources": sources,
+                    "result": result_preview[:200],
                 }
             )
         snapshot = task_snapshot(session, row.id)
@@ -548,9 +834,7 @@ def session_stats(session: Session, user: User) -> dict[str, Any]:
         ),
         "messages": int(
             session.scalar(
-                select(func.count(Message.id)).where(
-                    Message.conversation_id.in_(conversation_ids)
-                )
+                select(func.count(Message.id)).where(Message.conversation_id.in_(conversation_ids))
             )
             or 0
         ),
@@ -558,16 +842,29 @@ def session_stats(session: Session, user: User) -> dict[str, Any]:
             session.scalar(select(func.count(Task.id)).where(Task.user_id == user.id)) or 0
         ),
         "tool_calls": int(
-            session.scalar(
-                select(func.count(ToolCall.id)).where(ToolCall.task_id.in_(task_ids))
-            )
+            session.scalar(select(func.count(ToolCall.id)).where(ToolCall.task_id.in_(task_ids)))
             or 0
         ),
         "summary": latest.summary if latest else None,
-        "recent_messages": [
-            {"role": row.role, "content": row.content[:300]} for row in recent
-        ],
+        "recent_messages": [{"role": row.role, "content": row.content[:300]} for row in recent],
         "recent_tasks": task_previews,
+        "reminders": {
+            "total": reminder_total,
+            "active": reminder_active,
+        },
+        "recent_reminders": [
+            {
+                "id": row.id,
+                "message": row.message[:200],
+                "run_at": datetime.fromtimestamp(
+                    row.due_at_utc,
+                    ZoneInfo(row.timezone),
+                ).isoformat(timespec="seconds"),
+                "timezone": row.timezone,
+                "status": row.status,
+            }
+            for row in recent_reminders
+        ],
         "last_activity": last_activity.isoformat() if last_activity else None,
         "usage": user_usage(session, user),
     }
@@ -579,6 +876,26 @@ def wipe_session(session: Session, user: User) -> dict[str, int]:
         session.scalars(select(Conversation.id).where(Conversation.user_id == user.id)).all()
     )
     task_ids = list(session.scalars(select(Task.id).where(Task.user_id == user.id)).all())
+    reminder_count = int(
+        session.scalar(select(func.count(Reminder.id)).where(Reminder.user_id == user.id)) or 0
+    )
+    session.execute(
+        delete(Reminder).where(
+            Reminder.user_id == user.id,
+            Reminder.status != "delivering",
+        )
+    )
+    delivering = int(
+        session.scalar(
+            select(func.count(Reminder.id)).where(
+                Reminder.user_id == user.id,
+                Reminder.status == "delivering",
+            )
+        )
+        or 0
+    )
+    if delivering:
+        raise ReminderDeliveryInProgress
 
     if task_ids:
         linked_calls = list(
@@ -621,4 +938,5 @@ def wipe_session(session: Session, user: User) -> dict[str, int]:
         "conversations": len(conversation_ids),
         "tasks": len(task_ids),
         "legacy_unowned_tool_calls": legacy_orphans,
+        "reminders": reminder_count,
     }

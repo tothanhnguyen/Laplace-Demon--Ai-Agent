@@ -14,6 +14,7 @@ from laplace.bot.handlers import router
 from laplace.bot.middleware import IdentityRateLimitMiddleware
 from laplace.config import Settings
 from laplace.db import init_db
+from laplace.services.reminders import ReminderScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +35,17 @@ async def run_bot() -> None:
     dp = Dispatcher()
     dp.message.middleware(IdentityRateLimitMiddleware())
     dp.include_router(router)
+    reminders = ReminderScheduler(bot, settings)
 
     logger.info("Telegram bot bắt đầu polling...")
     try:
+        reminders.start()
         await dp.start_polling(bot)
     finally:
-        await bot.session.close()
+        try:
+            await reminders.shutdown()
+        finally:
+            await bot.session.close()
 
 
 def main() -> None:

@@ -1,1 +1,1 @@
-"""Bộ công cụ của Agent: registry rút gọn và các tool built-in."""
+"""Strict tool contracts and explicit production registrations."""

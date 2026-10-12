@@ -1,10 +1,12 @@
 """Kiểm thử tầng lưu trữ: models, engine in-memory và các helper repo."""
 
 import json
+import sqlite3
 
 import pytest
+from sqlalchemy import inspect, text
 
-from laplace.db import init_db, reset_engine_for_tests, session_scope
+from laplace.db import get_engine, init_db, reset_engine_for_tests, session_scope
 from laplace.repo import (
     add_message,
     get_or_create_conversation,
@@ -127,3 +129,76 @@ def test_record_trace_serializes_payload(db: None) -> None:
         assert trace.task_id is None
         assert json.loads(trace.payload_json) == payload
         assert "tiếng Việt" in trace.payload_json  # ensure_ascii=False giữ Unicode
+
+
+def test_sprint3_database_upgrade_is_additive_and_idempotent(tmp_path) -> None:
+    database = tmp_path / "sprint3.db"
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        """
+        PRAGMA foreign_keys=ON;
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            telegram_user_id INTEGER UNIQUE,
+            username VARCHAR(64),
+            created_at DATETIME
+        );
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            title VARCHAR(200),
+            created_at DATETIME
+        );
+        CREATE TABLE tasks (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            conversation_id INTEGER REFERENCES conversations(id),
+            goal TEXT NOT NULL,
+            status VARCHAR(32),
+            current_step INTEGER,
+            total_steps INTEGER,
+            created_at DATETIME,
+            updated_at DATETIME
+        );
+        INSERT INTO users(id, telegram_user_id, username)
+        VALUES (1, 9001, 'legacy');
+        INSERT INTO conversations(id, user_id, title)
+        VALUES (1, 1, 'legacy conversation');
+        INSERT INTO tasks(id, user_id, conversation_id, goal, status)
+        VALUES (1, 1, 1, 'legacy task', 'completed');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    reset_engine_for_tests(f"sqlite:///{database}")
+    try:
+        init_db()
+        init_db()
+        schema = inspect(get_engine())
+        reminder_columns = {item["name"] for item in schema.get_columns("reminders")}
+        reminder_indexes = {item["name"] for item in schema.get_indexes("reminders")}
+        assert {
+            "due_at_utc",
+            "next_attempt_at_utc",
+            "attempt_count",
+            "first_attempt_at_utc",
+            "last_attempt_at_utc",
+            "sent_at_utc",
+            "telegram_message_id",
+        } <= reminder_columns
+        assert {
+            "ix_reminders_due",
+            "ix_reminders_user_status_due",
+        } <= reminder_indexes
+        with get_engine().connect() as upgraded:
+            assert upgraded.execute(text("PRAGMA foreign_key_check")).all() == []
+            assert upgraded.execute(
+                text("SELECT telegram_user_id, username FROM users WHERE id=1")
+            ).one() == (9001, "legacy")
+            assert upgraded.execute(text("SELECT goal, status FROM tasks WHERE id=1")).one() == (
+                "legacy task",
+                "completed",
+            )
+    finally:
+        reset_engine_for_tests()

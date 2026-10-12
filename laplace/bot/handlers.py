@@ -1,12 +1,4 @@
-"""Handlers Telegram (aiogram v3): lệnh cơ bản và luồng chat có báo tiến độ.
-
-Mỗi tin nhắn văn bản chạy ``laplace.services.chat.handle_message`` trong
-thread riêng qua ``asyncio.to_thread`` để không chặn event loop; tiến độ được
-đẩy ngược về event loop bằng ``loop.call_soon_threadsafe`` và edit vào một
-message trạng thái duy nhất. Task đang chạy được ghi vào registry theo user
-để ``/cancel`` hủy được. Tài liệu gửi lên chỉ được tải về ``var/uploads/``;
-tóm tắt nội dung tài liệu thuộc sprint sau.
-"""
+"""Telegram commands, text turns, and bounded document turns."""
 
 import asyncio
 import logging
@@ -18,9 +10,10 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import Message
 
 from laplace.bot.textsplit import split_message
+from laplace.config import Settings
 from laplace.db import session_scope
 from laplace.repo import get_or_create_user, user_usage
-from laplace.services.chat import _run_reserved_message
+from laplace.services.chat import REMINDER_DIRECTIVES, _run_reserved_message
 from laplace.services.memory import (
     forget_memory,
     load_memory,
@@ -35,29 +28,32 @@ router = Router(name="laplace-bot")
 
 PROCESSING_TEXT = "Đang xử lý..."
 UPLOAD_DIR = Path("var/uploads")
-MAX_DOCUMENT_BYTES = 10 * 1024 * 1024  # 10MB
 
 # Lượt xử lý đang chạy của từng user — /cancel tra cứu ở đây để hủy.
 _running_tasks: dict[int, asyncio.Task] = {}
 
 START_TEXT = (
     "Xin chào! Mình là Laplace's Demon — trợ lý chat chạy trên LLM.\n\n"
-    "Cứ nhắn nội dung bạn cần, mình sẽ trả lời và báo tiến độ trong lúc xử lý.\n"
+    "Bạn có thể hỏi thông tin web có nguồn, đọc TXT/PDF/DOCX hoặc đặt reminder "
+    "một lần trong chat riêng.\n"
     "Các lệnh hỗ trợ:\n"
-    "/help — hướng dẫn sử dụng\n"
+    "/help — hướng dẫn và ví dụ\n"
     "/status — thống kê tokens và chi phí\n"
-    "/memory — xem bộ nhớ phiên trong chat riêng\n"
+    "/memory — xem bộ nhớ và reminder ID trong chat riêng\n"
     "/forget — xem phạm vi xóa; /forget confirm để xác nhận\n"
-    "/cancel — yêu cầu dừng lượt đang xử lý"
+    "/cancel — dừng lượt agent đang xử lý"
 )
 
 HELP_TEXT = (
     "Cách dùng:\n"
-    "- Nhắn văn bản bất kỳ để hỏi; mỗi người chỉ có một lượt chạy tại một thời điểm.\n"
-    "- /status xem usage; /memory xem hội thoại/task gần nhất trong chat riêng.\n"
-    "- /forget chỉ cảnh báo; /forget confirm xóa memory có liên kết nhưng giữ usage.\n"
-    "- /cancel yêu cầu dừng ở checkpoint tiếp theo; lời gọi model/tool đang chạy không bị ngắt.\n"
-    "- File tải lên chưa thuộc phạm vi /forget và chưa được tóm tắt ở Sprint 3."
+    "- Web: hỏi ví dụ “Tìm thông tin mới nhất về Python 3.14 kèm nguồn”.\n"
+    "- Tài liệu: trong chat riêng, gửi TXT/PDF/DOCX tối đa 10MB kèm yêu cầu; "
+    "PDF scan không có text cần OCR nên chưa hỗ trợ.\n"
+    "- Reminder trong chat riêng: `/remind gọi mẹ sau 10 phút`; dùng "
+    "`/remind_update #ID ...` hoặc `/remind_cancel #ID`. Kết quả và /memory "
+    "cung cấp ID. Trong yêu cầu nhiều bước, đặt directive sau dấu `;`.\n"
+    "- /cancel chỉ dừng lượt chat/document agent, không hủy reminder đang gửi.\n"
+    "- Mỗi người chỉ có một thao tác tài khoản đang chạy tại một thời điểm."
 )
 
 
@@ -157,6 +153,9 @@ def _memory_text(data: dict | None) -> str:
         f"- Cuộc hội thoại: {data['conversations']}",
         f"- Tin nhắn: {data['messages']}",
         f"- Nhiệm vụ / lời gọi tool: {data['tasks']} / {data['tool_calls']}",
+        f"- Reminder tổng/đang hoạt động: "
+        f"{data.get('reminders', {}).get('total', 0)} / "
+        f"{data.get('reminders', {}).get('active', 0)}",
         f"- Lần hoạt động cuối: {data['last_activity'] or 'chưa có'}",
         f"- Usage giữ lại: {data['usage']['total_tokens']} tokens, "
         f"${data['usage']['cost_usd']:.6f}",
@@ -167,9 +166,7 @@ def _memory_text(data: dict | None) -> str:
         lines.append("- Tóm tắt: " + str(data["summary"])[:800])
     if data.get("recent_messages"):
         lines.append("- Hội thoại gần nhất:")
-        lines.extend(
-            f"  {item['role']}: {item['content']}" for item in data["recent_messages"]
-        )
+        lines.extend(f"  {item['role']}: {item['content']}" for item in data["recent_messages"])
     if data.get("recent_tasks"):
         lines.append("- Nhiệm vụ gần nhất:")
         for item in data["recent_tasks"]:
@@ -178,11 +175,17 @@ def _memory_text(data: dict | None) -> str:
             if remaining:
                 lines.append(f"    còn lại: {'; '.join(remaining)}")
             for tool in item.get("tools", []):
-                source = f" [{tool['source']}]" if tool.get("source") else ""
+                sources = tool.get("sources") or []
+                source_text = f" [{'; '.join(sources)}]" if sources else ""
                 outcome = "OK" if tool["ok"] else "ERROR"
-                lines.append(
-                    f"    tool {tool['name']}{source} ({outcome}): {tool['result']}"
-                )
+                lines.append(f"    tool {tool['name']}{source_text} ({outcome}): {tool['result']}")
+    if data.get("recent_reminders"):
+        lines.append("- Reminder gần nhất:")
+        lines.extend(
+            f"  #{item['id']} [{item['status']}] {item['run_at']} "
+            f"({item.get('timezone', 'UTC')}): {item['message']}"
+            for item in data["recent_reminders"]
+        )
     return "\n".join(lines)
 
 
@@ -198,29 +201,33 @@ async def cmd_memory(message: Message, telegram_user_id: int) -> None:
 
 
 @router.message(Command("forget"))
-async def cmd_forget(
-    message: Message, telegram_user_id: int, command: CommandObject
-) -> None:
+async def cmd_forget(message: Message, telegram_user_id: int, command: CommandObject) -> None:
     """Cảnh báo hoặc xóa memory có liên kết sau xác nhận rõ ràng."""
     if not _is_private(message):
         await message.answer("Hãy mở chat riêng với bot để quản lý bộ nhớ phiên.")
         return
     if (command.args or "").strip() != "confirm":
         await message.answer(
-            "Lệnh này xóa conversations, messages, tasks, steps, traces và tool results "
-            "có liên kết của bạn. Usage, file đã tải lên, dữ liệu Telegram/provider và "
-            "tool logs cũ không xác định owner vẫn được giữ.\n"
+            "Lệnh này xóa conversations, messages, tasks, tool results và reminders "
+            "có liên kết của bạn. Usage và dữ liệu Telegram/provider vẫn được giữ; "
+            "tệp upload tạm đã được xóa sau lượt xử lý và không thuộc memory.\n"
             "Gõ /forget confirm để xác nhận."
         )
         return
     status, result = await asyncio.to_thread(forget_memory, telegram_user_id)
     if status == "busy":
         await message.answer(
-            "Lượt xử lý vẫn đang chạy. Hãy /cancel, chờ worker dừng rồi thử lại."
+            "Đang có thao tác tài khoản (chat, tài liệu hoặc reminder). "
+            "Chờ hoàn tất rồi dùng /forget confirm lại."
         )
         return
     if status == "empty":
         await message.answer("Bộ nhớ phiên đã trống; lịch sử usage vẫn được giữ.")
+        return
+    if status == "delivery_busy":
+        await message.answer(
+            "Một reminder đang được gửi. Chờ lần gửi hoàn tất rồi dùng /forget confirm lại."
+        )
         return
     assert result is not None
     suffix = ""
@@ -230,58 +237,92 @@ async def cmd_forget(
             "theo từng người dùng."
         )
     await message.answer(
-        "Đã xóa bộ nhớ phiên có liên kết của bạn; lịch sử usage và file tải lên "
-        f"được giữ.{suffix}"
+        "Đã xóa bộ nhớ phiên và reminder có liên kết của bạn; usage được giữ. "
+        "Tệp upload tạm đã được xóa sau lượt xử lý và không thuộc memory."
+        f"{suffix}"
     )
 
 
 @router.message(F.document)
-async def handle_document(message: Message, telegram_user_id: int) -> None:
-    """Tải tài liệu về ``var/uploads/`` và xác nhận, chưa xử lý nội dung.
-
-    Giới hạn 10MB để không kéo file lớn về máy; tóm tắt nội dung tài liệu là
-    tính năng của sprint sau nên chỉ xác nhận đã nhận file.
-    """
+async def handle_document(
+    message: Message, telegram_user_id: int, username: str | None = None
+) -> None:
+    """Download a bounded attachment and run it through the shared chat runtime."""
     document = message.document
-    if document is None:  # filter F.document bảo đảm, giữ guard cho type checker
+    if document is None:
         return
+    limit = Settings().document_max_bytes
     size = document.file_size or 0
-    if size > MAX_DOCUMENT_BYTES:
+    if size > limit:
         await message.answer(
             f"Tài liệu {size / (1024 * 1024):.1f}MB vượt giới hạn 10MB, mình không tải về được."
         )
         return
+    if not _is_private(message):
+        await message.answer("Hãy mở chat riêng với bot để xử lý tài liệu.")
+        return
 
-    # Tên file do người dùng đặt: chỉ giữ ký tự an toàn, tránh path traversal.
     raw_name = document.file_name or "tai-lieu"
     safe_name = re.sub(r"[^\w.\-]+", "_", Path(raw_name).name) or "tai-lieu"
-    dest = UPLOAD_DIR / f"{telegram_user_id}_{document.file_unique_id}_{safe_name}"
+    safe_id = re.sub(r"[^A-Za-z0-9_-]+", "_", document.file_unique_id)[:128] or "file"
+    attachment_id = f"telegram-{safe_id}"
+    dest = UPLOAD_DIR / f"{telegram_user_id}_{safe_id}_{safe_name}"
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     await message.bot.download(document, destination=dest)
-
-    await message.answer(
-        f"Đã nhận tài liệu \"{raw_name}\" ({size} bytes) và lưu lại.\n"
-        "Tính năng tóm tắt nội dung tài liệu sẽ có ở sprint sau."
-    )
+    handed_off = False
+    try:
+        if dest.stat().st_size > limit:
+            await message.answer("Tài liệu tải về vượt giới hạn 10MB.")
+            return
+        prompt = (message.caption or "").strip() or "Hãy tóm tắt tài liệu đính kèm."
+        handed_off = True
+        await _run_telegram_turn(
+            message,
+            telegram_user_id,
+            username,
+            prompt,
+            attachments={attachment_id: dest},
+        )
+    finally:
+        if not handed_off:
+            dest.unlink(missing_ok=True)
 
 
 @router.message(F.text)
 async def handle_text(message: Message, telegram_user_id: int, username: str | None) -> None:
-    """Reserve trước await, chạy worker thread và chỉ worker thật release lease."""
+    """Run a normal text turn through the shared Telegram turn helper."""
     text = (message.text or "").strip()
     if not text:
         return
     if text.startswith("/"):
-        await message.answer("Lệnh không được hỗ trợ. Gõ /help để xem hướng dẫn.")
-        return
+        directive = text.split(maxsplit=1)[0].casefold()
+        if directive not in REMINDER_DIRECTIVES:
+            await message.answer("Lệnh không được hỗ trợ. Gõ /help để xem hướng dẫn.")
+            return
+    await _run_telegram_turn(message, telegram_user_id, username, text)
+
+
+async def _run_telegram_turn(
+    message: Message,
+    telegram_user_id: int,
+    username: str | None,
+    text: str,
+    *,
+    attachments: dict[str, Path] | None = None,
+) -> None:
+    """Reserve once and run text/document messages through the same worker path."""
+
+    def cleanup_attachments() -> None:
+        for path in (attachments or {}).values():
+            path.unlink(missing_ok=True)
 
     lease = try_reserve_turn(telegram_user_id)
     if lease is None:
-        await message.answer(
-            "Mình đang xử lý một yêu cầu khác. Chờ xong hoặc dùng /cancel nhé."
-        )
+        cleanup_attachments()
+        await message.answer("Mình đang xử lý một yêu cầu khác. Chờ xong hoặc dùng /cancel nhé.")
         return
     worker_started = False
+    task: asyncio.Task | None = None
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
         status = await message.answer(PROCESSING_TEXT)
@@ -295,6 +336,9 @@ async def handle_text(message: Message, telegram_user_id: int, username: str | N
                 username,
                 text,
                 editor.push_threadsafe,
+                transport="telegram",
+                is_private_chat=_is_private(message),
+                attachments=attachments,
             )
         )
         worker_started = True
@@ -322,3 +366,8 @@ async def handle_text(message: Message, telegram_user_id: int, username: str | N
     finally:
         if not worker_started:
             release_turn(lease)
+        if attachments:
+            if task is not None and not task.done():
+                task.add_done_callback(lambda _finished: cleanup_attachments())
+            else:
+                cleanup_attachments()

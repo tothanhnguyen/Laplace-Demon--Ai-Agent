@@ -1,8 +1,8 @@
-"""Mô hình ORM SQLAlchemy 2.0 cho lưu trữ và memory Sprint 3."""
+"""Mô hình ORM SQLAlchemy 2.0 cho lưu trữ, memory và reminder."""
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -26,6 +26,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="user")
+    reminders: Mapped[list["Reminder"]] = relationship(back_populates="user")
 
 
 class Conversation(Base):
@@ -141,3 +142,33 @@ class Trace(Base):
     step_index: Mapped[int] = mapped_column(Integer)
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Reminder(Base):
+    """Durable owner-scoped one-shot Telegram reminder."""
+
+    __tablename__ = "reminders"
+    __table_args__ = (
+        Index("ix_reminders_due", "status", "next_attempt_at_utc", "id"),
+        Index("ix_reminders_user_status_due", "user_id", "status", "due_at_utc"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False)
+    due_at_utc: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_attempt_at_utc: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    first_attempt_at_utc: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_attempt_at_utc: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sent_at_utc: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telegram_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="reminders")

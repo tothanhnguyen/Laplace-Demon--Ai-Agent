@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 TOOL_OBSERVATION_MAX_CHARS = 1_200
+DOCUMENT_TOOL_OBSERVATION_MAX_CHARS = 6_000
 TASK_CARD_MAX_CHARS = 1_000
 SUMMARY_MAX_CHARS = 2_000
 INVALID_REPLY_MAX_CHARS = 1_000
@@ -146,11 +147,7 @@ def build_context(
         state = _session_state(task_card, None)
         dropped += 1
         messages = assemble()
-    if (
-        state is not None
-        and message_chars(messages) > max_chars
-        and not task_card
-    ):
+    if state is not None and message_chars(messages) > max_chars and not task_card:
         state = None
         dropped += 1
         messages = assemble()
@@ -169,38 +166,46 @@ def build_context(
 def bounded_tool_observation(
     *,
     tool_name: str,
-    ok: bool,
-    payload: str,
+    result: dict[str, Any],
     tool_call_id: int,
-    source: str | None = None,
     limit: int = TOOL_OBSERVATION_MAX_CHARS,
 ) -> dict[str, str]:
-    """Đóng gói excerpt JSON hữu hạn; ID chỉ dùng để truy vết trong DB."""
+    """Keep canonical failure/source metadata while bounding untrusted data."""
+
+    raw_sources = result.get("sources")
+    sources = raw_sources if isinstance(raw_sources, list) else []
+    visible_sources = [_bounded_text(str(source), 100) for source in sources[:5]]
+    data_text = json.dumps(result.get("data"), ensure_ascii=False, sort_keys=True)
     base = {
-        "tool": _bounded_text(tool_name, 100),
-        "ok": ok,
+        "tool": _bounded_text(tool_name, 64),
         "tool_call_id": tool_call_id,
-        "source": _bounded_text(source or "", 200),
-        "payload_chars": len(payload),
+        "ok": bool(result.get("ok")),
+        "error": _bounded_text(str(result.get("error") or ""), 200),
+        "error_code": result.get("error_code"),
+        "retryable": bool(result.get("retryable")),
+        "sources": visible_sources,
+        "sources_omitted": max(0, len(sources) - len(visible_sources)),
+        "latency_ms": int(result.get("latency_ms") or 0),
+        "data_chars": len(data_text),
         "truncated": False,
-        "excerpt": payload,
+        "data_excerpt": data_text,
     }
     prefix = "UNTRUSTED_TOOL_DATA_JSON:\n"
     suffix = "\nDecide the next action as one JSON object."
 
     def render(excerpt: str) -> str:
         data = dict(base)
-        data["excerpt"] = excerpt
-        data["truncated"] = excerpt != payload
+        data["data_excerpt"] = excerpt
+        data["truncated"] = excerpt != data_text
         return prefix + json.dumps(data, ensure_ascii=False) + suffix
 
-    content = render(payload)
+    content = render(data_text)
     if len(content) > limit:
-        low, high = 0, len(payload)
+        low, high = 0, len(data_text)
         best = ""
         while low <= high:
             size = (low + high) // 2
-            candidate = _bounded_text(payload, size) if size else ""
+            candidate = _bounded_text(data_text, size) if size else ""
             rendered = render(candidate)
             if len(rendered) <= limit:
                 best = candidate
@@ -209,7 +214,12 @@ def bounded_tool_observation(
                 high = size - 1
         content = render(best)
     if len(content) > limit:
-        raise ValueError("metadata của tool observation vượt giới hạn")
+        base["sources"] = [_bounded_text(source, 80) for source in visible_sources[:2]]
+        base["sources_omitted"] = max(0, len(sources) - len(base["sources"]))
+        base["error"] = _bounded_text(str(base["error"]), 100)
+        content = render("")
+    if len(content) > limit:
+        raise ValueError("tool observation metadata exceeds its hard limit")
     return {"role": "user", "content": content}
 
 
@@ -236,9 +246,10 @@ def retry_group(raw_reply: str | None, error: str) -> MessageGroup:
 def render_task_card(snapshot: dict[str, Any]) -> str:
     """Render bounded task data while retaining every core state field."""
     tools = snapshot.get("tools") or []
-    tool_text = ", ".join(
-        f"{item['name']} (x{item['count']}, lỗi {item['failed']})" for item in tools
-    ) or "chưa có"
+    tool_text = (
+        ", ".join(f"{item['name']} (x{item['count']}, lỗi {item['failed']})" for item in tools)
+        or "chưa có"
+    )
     criteria_value = snapshot.get("criteria")
     criteria = (
         [str(item) for item in criteria_value]
@@ -388,17 +399,20 @@ def extractive_summary(
             )
         )
     for row in tool_rows:
-        source = str(row.get("source") or row.get("tool_name") or "").strip()
+        sources = row.get("sources")
+        source_values = sources if isinstance(sources, list) else []
         payload = str(row.get("payload") or "").strip()
         tool_id = int(row["id"])
-        if source:
-            entries.append(
-                SummaryEntry(
-                    kind="source",
-                    text=_bounded_text(source, 250),
-                    source_tool_call_ids=[tool_id],
+        for source in source_values:
+            source_text = str(source).strip()
+            if source_text:
+                entries.append(
+                    SummaryEntry(
+                        kind="source",
+                        text=_bounded_text(source_text, 250),
+                        source_tool_call_ids=[tool_id],
+                    )
                 )
-            )
         if payload:
             entries.append(
                 SummaryEntry(

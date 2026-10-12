@@ -41,7 +41,14 @@ def main() -> None:
 
         init_db()
         # CLI dùng identity dev cố định; identity thật đến từ Telegram.
-        reply = handle_message(0, "cli", arguments.chat, progress=print)
+        reply = handle_message(
+            0,
+            "cli",
+            arguments.chat,
+            progress=print,
+            transport="cli",
+            is_private_chat=True,
+        )
         print(reply.text)
         print(f"usage={reply.usage}")
         return

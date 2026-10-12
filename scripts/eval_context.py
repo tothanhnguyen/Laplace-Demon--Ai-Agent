@@ -307,6 +307,8 @@ def _run_case(
                 provider=provider,
                 context_strategy=strategy,
                 context_observer=observe,
+                transport="cli",
+                is_private_chat=True,
             )
             answer = reply.text
             watermarks.append(_latest_watermark(user_id))
