@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -11,9 +12,12 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from laplace.tools.base import ToolFailure
+
+if TYPE_CHECKING:
+    from laplace.services.budget import TurnBudget
 
 DocumentFormat = Literal["txt", "pdf", "docx"]
 
@@ -50,8 +54,8 @@ class DocumentLimits:
                 raise ValueError(f"{name} must be positive")
         if self.max_expanded_bytes is not None and self.max_expanded_bytes < 1:
             raise ValueError("max_expanded_bytes must be positive")
-        if self.parse_timeout_seconds <= 0:
-            raise ValueError("parse_timeout_seconds must be positive")
+        if not math.isfinite(self.parse_timeout_seconds) or self.parse_timeout_seconds <= 0:
+            raise ValueError("parse_timeout_seconds must be finite and positive")
         if self.memory_limit_bytes < 1:
             raise ValueError("memory_limit_bytes must be positive")
 
@@ -103,22 +107,30 @@ def extract_document(
     paths: Mapping[str, Path],
     attachment_id: str,
     limits: DocumentLimits,
+    *,
+    budget: TurnBudget,
 ) -> ExtractedDocument:
     """Resolve an opaque ID and extract its document without returning its path."""
 
+    budget.check()
     attachment = _resolve_attachment(paths, attachment_id, limits)
+    budget.check()
     if attachment.metadata.format == "txt":
         units = _extract_txt(attachment.path, limits)
+        budget.check()
         unit_kind = "line"
         limitations: tuple[str, ...] = ()
     else:
         if attachment.metadata.format == "docx":
             _preflight_docx(attachment.path, limits)
+            budget.check()
         units = _parse_in_subprocess(
             attachment.path,
             attachment.metadata.format,
             limits,
+            budget=budget,
         )
+        budget.check()
         if attachment.metadata.format == "pdf":
             unit_kind = "page"
             limitations = (
@@ -303,6 +315,8 @@ def _parse_in_subprocess(
     path: Path,
     document_format: Literal["pdf", "docx"],
     limits: DocumentLimits,
+    *,
+    budget: TurnBudget,
 ) -> tuple[LocatorUnit, ...]:
     request = json.dumps(
         {
@@ -319,6 +333,7 @@ def _parse_in_subprocess(
     if len(request) > 64 * 1024:
         raise ToolFailure("runtime_error", "The document parser request is too large.")
 
+    budget.check()
     process = subprocess.Popen(
         [sys.executable, "-m", "laplace.services.documents", "--worker"],
         stdin=subprocess.PIPE,
@@ -327,11 +342,21 @@ def _parse_in_subprocess(
         cwd=os.fspath(Path(__file__).resolve().parents[2]),
     )
     try:
-        stdout, _ = process.communicate(request, timeout=limits.parse_timeout_seconds)
+        budget.check()
+        stdout, _ = process.communicate(
+            request, timeout=min(limits.parse_timeout_seconds, budget.remaining_seconds())
+        )
     except subprocess.TimeoutExpired:
         process.kill()
         process.communicate()
+        budget.check()
         raise ToolFailure("timeout", "Document parsing timed out.", retryable=True) from None
+    except BaseException:
+        if process.poll() is None:
+            process.kill()
+        process.communicate()
+        raise
+    budget.check()
     if len(stdout) > _MAX_PROTOCOL_BYTES:
         raise ToolFailure("runtime_error", "The document parser returned too much data.")
     if process.returncode != 0:

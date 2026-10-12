@@ -1,5 +1,6 @@
 """Application settings loaded from environment variables or a local file."""
 
+from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -65,6 +66,15 @@ class Settings(BaseSettings):
     reminder_send_timeout_seconds: float = Field(default=10.0, gt=0, le=30)
     reminder_batch_size: int = Field(default=25, ge=1, le=100)
     reminder_max_concurrency: int = Field(default=5, ge=1, le=20)
+    approval_timeout_seconds: int = Field(default=900, ge=1, le=900)
+
+    # One cumulative execution budget, including every physical model attempt.
+    max_steps: int = Field(default=5, ge=1, le=20)
+    max_seconds: float = Field(default=120, ge=1, le=600, allow_inf_nan=False)
+    max_cost_per_task: Decimal = Field(default=Decimal("0.10"), ge=0, le=10)
+    llm_max_completion_tokens: int = Field(default=2_048, ge=1, le=8_192)
+    llm_timeout_seconds: float = Field(default=30, ge=1, le=120, allow_inf_nan=False)
+    max_repeated_errors: int = Field(default=3, ge=1, le=5)
 
     @field_validator("timezone")
     @classmethod

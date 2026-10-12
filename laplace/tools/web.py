@@ -6,7 +6,7 @@ from pydantic import Field
 
 from laplace.config import Settings
 from laplace.services.web import TavilyClient, canonical_public_url
-from laplace.tools.base import ToolContext, ToolFailure, ToolModel, ToolPayload, tool
+from laplace.tools.base import RiskLevel, ToolContext, ToolFailure, ToolModel, ToolPayload, tool
 
 
 class WebSearchArgs(ToolModel):
@@ -51,18 +51,22 @@ class FetchPageOutput(ToolModel):
     when_not_to_use=(
         "Do not use for private resources, logged-in pages, or when no web evidence is needed."
     ),
-    risk_level="low",
+    risk_level=RiskLevel.READ,
     args_model=WebSearchArgs,
     result_model=WebSearchOutput,
 )
-def web_search(args: WebSearchArgs, _context: ToolContext) -> ToolPayload:
+def web_search(args: WebSearchArgs, context: ToolContext) -> ToolPayload:
     settings = Settings()
     query = args.query.strip()
     if len(query) < 2:
         raise ToolFailure("invalid_input", "query must contain at least two characters.")
     maximum = min(args.max_results, settings.web_max_results)
-    with TavilyClient(settings.tavily_api_key, settings.http_timeout_seconds) as client:
+    context.budget.check()
+    with TavilyClient(
+        settings.tavily_api_key, settings.http_timeout_seconds, budget=context.budget
+    ) as client:
         results = client.search(query, max_results=maximum, topic=args.topic)
+    context.budget.check()
     data = {
         "query": query,
         "results": [
@@ -83,11 +87,11 @@ def web_search(args: WebSearchArgs, _context: ToolContext) -> ToolPayload:
     purpose="Extract bounded relevant text from one public web page with its source URL.",
     when_to_use="Use after search when a specific public result needs stronger evidence.",
     when_not_to_use="Do not use for private, local, authenticated, or arbitrary non-web resources.",
-    risk_level="low",
+    risk_level=RiskLevel.READ,
     args_model=FetchPageArgs,
     result_model=FetchPageOutput,
 )
-def fetch_page(args: FetchPageArgs, _context: ToolContext) -> ToolPayload:
+def fetch_page(args: FetchPageArgs, context: ToolContext) -> ToolPayload:
     settings = Settings()
     query = args.query.strip()
     if len(query) < 2:
@@ -96,12 +100,16 @@ def fetch_page(args: FetchPageArgs, _context: ToolContext) -> ToolPayload:
         url = canonical_public_url(args.url)
     except ValueError as exc:
         raise ToolFailure("invalid_input", str(exc)) from exc
-    with TavilyClient(settings.tavily_api_key, settings.http_timeout_seconds) as client:
+    context.budget.check()
+    with TavilyClient(
+        settings.tavily_api_key, settings.http_timeout_seconds, budget=context.budget
+    ) as client:
         results = client.extract(
             (url,),
             query=query,
             chunks_per_source=settings.web_max_chunks,
         )
+    context.budget.check()
     data = {
         "query": query,
         "results": [{"url": item.url, "content": item.content} for item in results],

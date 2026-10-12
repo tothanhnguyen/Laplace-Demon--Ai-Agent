@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -13,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from laplace.config import Settings
 from laplace.db import session_scope
+from laplace.logging import safe_error_code
 from laplace.models import Reminder
 from laplace.repo import (
     claim_reminder,
@@ -225,7 +227,7 @@ async def dispatch_due(
                         session,
                         item.reminder_id,
                         now_utc=failure_at,
-                        error=type(exc).__name__,
+                        error=safe_error_code(exc),
                         retry_at_utc=failure_at + settings.reminder_scan_interval_seconds,
                         max_attempts=settings.reminder_max_attempts,
                         grace_seconds=settings.reminder_misfire_grace_seconds,
@@ -233,13 +235,8 @@ async def dispatch_due(
                     )
             except Exception as cleanup_error:
                 logger.error(
-                    "Could not requeue pre-send reminder %s",
-                    item.reminder_id,
-                    exc_info=(
-                        type(cleanup_error),
-                        cleanup_error,
-                        cleanup_error.__traceback__,
-                    ),
+                    "Could not requeue pre-send reminder: %s",
+                    safe_error_code(cleanup_error),
                 )
             finally:
                 release_turn(item.lease)
@@ -256,7 +253,7 @@ async def dispatch_due(
                     session,
                     item.reminder_id,
                     now_utc=failure_at,
-                    error=type(exc).__name__,
+                    error=safe_error_code(exc),
                     retry_at_utc=failure_at + delay,
                     max_attempts=settings.reminder_max_attempts,
                     grace_seconds=settings.reminder_misfire_grace_seconds,
@@ -326,8 +323,7 @@ async def dispatch_due(
         for error in errors:
             logger.error(
                 "Reminder delivery task failed: %s",
-                type(error).__name__,
-                exc_info=(type(error), error, error.__traceback__),
+                safe_error_code(error),
             )
     return sum(result is True for result in results)
 
@@ -335,12 +331,18 @@ async def dispatch_due(
 class ReminderScheduler:
     """AsyncIOScheduler lifecycle wrapper with bounded in-flight shutdown."""
 
-    def __init__(self, bot: ReminderBot, settings: Settings) -> None:
+    def __init__(
+        self,
+        bot: ReminderBot,
+        settings: Settings,
+        maintenance: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         self._bot = bot
         self._settings = settings
         self._scheduler = AsyncIOScheduler(timezone="UTC")
         self._active: set[asyncio.Task] = set()
         self._stopping = False
+        self._maintenance = maintenance
 
     async def _tick(self) -> None:
         if self._stopping:
@@ -350,6 +352,21 @@ class ReminderScheduler:
             self._active.add(task)
         try:
             await dispatch_due(self._bot, self._settings)
+        finally:
+            if task is not None:
+                self._active.discard(task)
+
+    async def _maintenance_tick(self) -> None:
+        if self._stopping or self._maintenance is None:
+            return
+        task = asyncio.current_task()
+        if task is not None:
+            self._active.add(task)
+        try:
+            await self._maintenance()
+        except Exception as exc:
+            # APScheduler's default exception traceback may expose private SQL params.
+            logger.error("Approval maintenance failed: %s", safe_error_code(exc))
         finally:
             if task is not None:
                 self._active.discard(task)
@@ -365,13 +382,27 @@ class ReminderScheduler:
             coalesce=True,
             replace_existing=True,
         )
+        if self._maintenance is not None:
+            self._scheduler.add_job(
+                self._maintenance_tick,
+                "interval",
+                seconds=1,
+                id="laplace-approval-maintenance",
+                max_instances=1,
+                coalesce=True,
+                replace_existing=True,
+            )
         self._scheduler.start()
 
-    async def shutdown(self) -> None:
+    def stop_jobs(self) -> None:
+        """Stop admission of both expiry and delivery jobs, without canceling sends."""
         self._stopping = True
-        running = self._scheduler.running
-        if running:
+        if self._scheduler.running:
             self._scheduler.pause()
+
+    async def shutdown(self) -> None:
+        self.stop_jobs()
+        running = self._scheduler.running
         active = [task for task in self._active if task is not asyncio.current_task()]
         if active:
             _done, pending = await asyncio.wait(

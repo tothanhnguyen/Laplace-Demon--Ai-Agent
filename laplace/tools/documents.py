@@ -4,7 +4,7 @@ from pydantic import Field
 
 from laplace.config import Settings
 from laplace.services.documents import DocumentLimits, extract_document
-from laplace.tools.base import ToolContext, ToolFailure, ToolModel, ToolPayload, tool
+from laplace.tools.base import RiskLevel, ToolContext, ToolFailure, ToolModel, ToolPayload, tool
 
 
 class ReadDocumentArgs(ToolModel):
@@ -42,7 +42,7 @@ class ReadDocumentOutput(ToolModel):
     when_not_to_use=(
         "Do not invent attachment IDs, access filesystem paths, or claim OCR/image understanding."
     ),
-    risk_level="low",
+    risk_level=RiskLevel.READ,
     args_model=ReadDocumentArgs,
     result_model=ReadDocumentOutput,
 )
@@ -58,7 +58,13 @@ def read_document(args: ReadDocumentArgs, context: ToolContext) -> ToolPayload:
         parse_timeout_seconds=settings.document_parse_timeout_seconds,
         memory_limit_bytes=settings.document_parser_memory_mb * 1024 * 1024,
     )
-    document = extract_document(context.attachments, args.attachment_id, limits)
+    context.budget.check()
+    try:
+        document = extract_document(
+            context.attachments, args.attachment_id, limits, budget=context.budget
+        )
+    finally:
+        context.budget.check()
     start_index = args.start_unit - 1
     if start_index >= len(document.units):
         raise ToolFailure("invalid_input", "start_unit is beyond the document.")

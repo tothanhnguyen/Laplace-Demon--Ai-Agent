@@ -21,6 +21,8 @@ class ProviderPreset:
     default_model: str
     key_url: str  # trang lấy API key
     pricing: Pricing = field(default_factory=dict)
+    output_cap_parameter: str = "max_tokens"
+    pricing_version: str = "preset-usd-per-million-2026-09-v1"
 
     @property
     def env_key(self) -> str:
@@ -60,10 +62,17 @@ PRESETS: dict[str, ProviderPreset] = {
             key_url="https://platform.openai.com/api-keys",
             pricing={
                 "gpt-4o": (2.50, 10.00),
+                "gpt-4o-2024-05-13": (5.00, 15.00),
+                "gpt-4o-2024-08-06": (2.50, 10.00),
+                "gpt-4o-2024-11-20": (2.50, 10.00),
                 "gpt-4o-mini": (0.15, 0.60),
+                "gpt-4o-mini-2024-07-18": (0.15, 0.60),
                 "gpt-4.1": (2.00, 8.00),
+                "gpt-4.1-2025-04-14": (2.00, 8.00),
                 "gpt-4.1-mini": (0.40, 1.60),
+                "gpt-4.1-mini-2025-04-14": (0.40, 1.60),
                 "gpt-4.1-nano": (0.10, 0.40),
+                "gpt-4.1-nano-2025-04-14": (0.10, 0.40),
             },
         ),
         ProviderPreset(
@@ -72,6 +81,7 @@ PRESETS: dict[str, ProviderPreset] = {
             base_url="https://api.b.ai/v1",
             default_model="gpt-5.2",
             key_url="https://chat.b.ai/chat",
+            output_cap_parameter="max_completion_tokens",
             pricing={
                 # B.AI standard pricing, USD/1M tokens.
                 # docs.b.ai/llmservice/pricing-and-usage/, tra cứu 2026-09-16.
@@ -84,11 +94,16 @@ PRESETS: dict[str, ProviderPreset] = {
             base_url="http://127.0.0.1:20128/v1",
             default_model="cx/gpt-5.6-sol",
             key_url="http://127.0.0.1:20128/dashboard",
+            output_cap_parameter="max_completion_tokens",
             pricing={
                 # Route qua subscription Codex: chi phí biên mỗi request là 0;
                 # phí thuê bao và quota không thể quy đổi chính xác theo token.
                 "cx/gpt-5.6-sol": (0.0, 0.0),
                 "gpt-5.6-sol": (0.0, 0.0),
+                "cx/gpt-5.6-luna": (0.0, 0.0),
+                "gpt-5.6-luna": (0.0, 0.0),
+                "cx/gpt-5.5": (0.0, 0.0),
+                "gpt-5.5": (0.0, 0.0),
             },
         ),
         ProviderPreset(

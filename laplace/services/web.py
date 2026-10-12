@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import httpx
 
 from laplace.tools.base import ToolFailure
+
+if TYPE_CHECKING:
+    from laplace.services.budget import TurnBudget
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 TAVILY_EXTRACT_URL = "https://api.tavily.com/extract"
@@ -106,21 +110,22 @@ def canonical_public_url(value: str) -> str:
 
 
 class SyncHttpxAdapter:
-    """Injectable httpx transport with bounded reads and safe error mapping."""
+    """Synchronous bridge to cancellable async HTTP with bounded total reads."""
 
     def __init__(
         self,
         *,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
         max_response_bytes: int = MAX_RESPONSE_BYTES,
     ) -> None:
         if max_response_bytes < 1 or max_response_bytes > MAX_RESPONSE_BYTES:
             raise ValueError(f"max_response_bytes must be between 1 and {MAX_RESPONSE_BYTES}")
         self._max_response_bytes = max_response_bytes
-        self._client = httpx.Client(transport=transport, follow_redirects=False)
+        self._transport = transport
 
     def close(self) -> None:
-        self._client.close()
+        if self._transport is not None:
+            asyncio.run(self._transport.aclose())
 
     def __enter__(self) -> SyncHttpxAdapter:
         return self
@@ -136,31 +141,49 @@ class SyncHttpxAdapter:
         payload: Mapping[str, Any],
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        if not 0 < timeout_seconds <= _MAX_TIMEOUT_SECONDS:
+        if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= _MAX_TIMEOUT_SECONDS:
             raise ToolFailure(
                 "configuration_error", "Web request timeout is not configured safely."
             )
 
+        return asyncio.run(
+            self._post_json_async(
+                url, headers=headers, payload=payload, timeout_seconds=timeout_seconds
+            )
+        )
+
+    async def _post_json_async(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
         try:
-            with self._client.stream(
-                "POST",
-                url,
-                headers=headers,
-                json=payload,
-                timeout=timeout_seconds,
-            ) as response:
-                self._raise_for_status(response.status_code)
-                body = bytearray()
-                for chunk in response.iter_bytes():
-                    if len(body) + len(chunk) > self._max_response_bytes:
-                        raise ToolFailure(
-                            "upstream_error",
-                            "Web service returned a response that was too large.",
-                        )
-                    body.extend(chunk)
+            async with asyncio.timeout(timeout_seconds):
+                async with httpx.AsyncClient(
+                    transport=self._transport, follow_redirects=False
+                ) as client:
+                    async with client.stream(
+                        "POST",
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=timeout_seconds,
+                    ) as response:
+                        self._raise_for_status(response.status_code)
+                        body = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            if len(body) + len(chunk) > self._max_response_bytes:
+                                raise ToolFailure(
+                                    "upstream_error",
+                                    "Web service returned a response that was too large.",
+                                )
+                            body.extend(chunk)
         except ToolFailure:
             raise
-        except httpx.TimeoutException as exc:
+        except (TimeoutError, httpx.TimeoutException) as exc:
             raise ToolFailure(
                 "timeout",
                 "Web service request timed out.",
@@ -224,10 +247,16 @@ class TavilyClient:
         api_key: str,
         timeout_seconds: float,
         *,
+        budget: TurnBudget,
         adapter: SyncHttpxAdapter | None = None,
     ) -> None:
         if not api_key.strip():
             raise ToolFailure("configuration_error", "Web tools are not configured.")
+        if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= _MAX_TIMEOUT_SECONDS:
+            raise ToolFailure(
+                "configuration_error", "Web request timeout is not configured safely."
+            )
+        self._budget = budget
         self._api_key = api_key.strip()
         self._timeout_seconds = timeout_seconds
         self._adapter = adapter or SyncHttpxAdapter()
@@ -308,16 +337,20 @@ class TavilyClient:
         return tuple(results)
 
     def _post(self, url: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        return self._adapter.post_json(
-            url,
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
-            payload=payload,
-            timeout_seconds=self._timeout_seconds,
-        )
+        self._budget.check()
+        try:
+            return self._adapter.post_json(
+                url,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                payload=payload,
+                timeout_seconds=min(self._timeout_seconds, self._budget.remaining_seconds()),
+            )
+        finally:
+            self._budget.check()
 
     @staticmethod
     def _parse_search_result(raw: object) -> SearchResult | None:

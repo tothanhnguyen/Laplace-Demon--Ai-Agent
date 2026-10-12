@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
+from laplace.logging import safe_event
 from laplace.models import (
     Conversation,
     LLMCall,
@@ -17,6 +19,7 @@ from laplace.models import (
     Reminder,
     Step,
     Task,
+    ToolApproval,
     ToolCall,
     Trace,
     User,
@@ -28,6 +31,279 @@ DB_EXCERPT_CHARS = 1_200
 
 class ReminderDeliveryInProgress(RuntimeError):
     """Raised when memory deletion races an already claimed delivery."""
+
+
+class ApprovalTransitionConflict(RuntimeError):
+    """The approval/task pair changed; the caller must roll back."""
+
+
+def _transition_approval_task(
+    session: Session, approval: ToolApproval, *, source: str, status: str
+) -> None:
+    changed = session.execute(
+        update(Task)
+        .where(
+            Task.id == approval.task_id,
+            Task.user_id == approval.user_id,
+            Task.status == source,
+        )
+        .values(status=status, updated_at=utcnow())
+    )
+    if changed.rowcount != 1:
+        raise ApprovalTransitionConflict("Approval task transition did not win.")
+
+
+def create_tool_approval(
+    session: Session,
+    *,
+    token: str,
+    user_id: int,
+    task_id: int,
+    step_index: int,
+    tool_name: str,
+    risk_level: str,
+    params_json: str,
+    public_args_hash: str,
+    resource_fingerprint: str | None,
+    preview_json: str,
+    created_at: int,
+    expires_at: int,
+    chat_id: int,
+) -> ToolApproval:
+    approval = ToolApproval(
+        token=token,
+        user_id=user_id,
+        task_id=task_id,
+        step_index=step_index,
+        tool_name=tool_name,
+        risk_level=risk_level,
+        params_json=params_json,
+        public_args_hash=public_args_hash,
+        resource_fingerprint=resource_fingerprint,
+        preview_json=preview_json,
+        status="pending",
+        created_at=created_at,
+        expires_at=expires_at,
+        chat_id=chat_id,
+    )
+    session.add(approval)
+    session.flush()
+    _transition_approval_task(
+        session, approval, source="running", status="awaiting_approval"
+    )
+    return approval
+
+
+def find_tool_approval(
+    session: Session, token: str, *, telegram_user_id: int | None = None
+) -> ToolApproval | None:
+    query = select(ToolApproval).where(ToolApproval.token == token)
+    if telegram_user_id is not None:
+        query = query.join(User, ToolApproval.user_id == User.id).where(
+            User.telegram_user_id == telegram_user_id
+        )
+    return session.scalar(query)
+
+
+def bind_approval_preview(
+    session: Session,
+    approval_id: int,
+    *,
+    chat_id: int,
+    message_id: int,
+    now_utc: int,
+) -> bool:
+    if message_id <= 0:
+        return False
+    task_awaiting = select(Task.id).where(
+        Task.id == ToolApproval.task_id,
+        Task.user_id == ToolApproval.user_id,
+        Task.status == "awaiting_approval",
+    ).exists()
+    private_owner = select(User.id).where(
+        User.id == ToolApproval.user_id, User.telegram_user_id == chat_id
+    ).exists()
+    changed = session.execute(
+        update(ToolApproval)
+        .where(
+            ToolApproval.id == approval_id,
+            ToolApproval.status == "pending",
+            ToolApproval.chat_id == chat_id,
+            ToolApproval.preview_message_id.is_(None),
+            ToolApproval.expires_at > now_utc,
+            task_awaiting,
+            private_owner,
+        )
+        .values(preview_message_id=message_id)
+    )
+    return changed.rowcount == 1
+
+
+def claim_tool_approval(
+    session: Session,
+    token: str,
+    *,
+    telegram_user_id: int,
+    chat_id: int,
+    message_id: int,
+    now_utc: int,
+) -> ToolApproval | None:
+    if chat_id != telegram_user_id or message_id <= 0:
+        return None
+    approval = session.scalar(
+        select(ToolApproval)
+        .join(User, User.id == ToolApproval.user_id)
+        .join(Task, Task.id == ToolApproval.task_id)
+        .where(
+            ToolApproval.token == token,
+            ToolApproval.status == "pending",
+            ToolApproval.chat_id == chat_id,
+            ToolApproval.preview_message_id == message_id,
+            ToolApproval.expires_at > now_utc,
+            User.telegram_user_id == telegram_user_id,
+            Task.user_id == ToolApproval.user_id,
+            Task.status == "awaiting_approval",
+        )
+    )
+    if approval is None:
+        return None
+    changed = session.execute(
+        update(ToolApproval)
+        .where(
+            ToolApproval.id == approval.id,
+            ToolApproval.token == token,
+            ToolApproval.user_id == approval.user_id,
+            ToolApproval.task_id == approval.task_id,
+            ToolApproval.user_id.in_(
+                select(User.id).where(User.telegram_user_id == telegram_user_id)
+            ),
+            ToolApproval.status == "pending",
+            ToolApproval.chat_id == chat_id,
+            ToolApproval.preview_message_id == message_id,
+            ToolApproval.expires_at > now_utc,
+        )
+        .values(status="approved", decided_at=now_utc)
+    )
+    if changed.rowcount != 1:
+        return None
+    _transition_approval_task(session, approval, source="awaiting_approval", status="running")
+    session.refresh(approval)
+    return approval
+
+
+def resolve_tool_approval(
+    session: Session,
+    token: str,
+    *,
+    status: str,
+    now_utc: int,
+    telegram_user_id: int | None = None,
+    task_status: str | None = None,
+    allowed_statuses: tuple[str, ...] = ("pending",),
+) -> ToolApproval | None:
+    terminal_tasks = {
+        "rejected": "rejected",
+        "expired": "expired",
+        "cancelled": "cancelled",
+        "interrupted": "interrupted",
+        "invalidated": "failed",
+        "failed": "failed",
+    }
+    if status not in terminal_tasks or not set(allowed_statuses) <= {"pending", "approved"}:
+        raise ValueError("Unsupported approval transition.")
+    approval = find_tool_approval(session, token, telegram_user_id=telegram_user_id)
+    if approval is None or approval.status not in allowed_statuses:
+        return None
+    source = approval.status
+    conditions = [
+        ToolApproval.id == approval.id,
+        ToolApproval.token == token,
+        ToolApproval.status == source,
+    ]
+    if telegram_user_id is not None:
+        conditions.append(
+            ToolApproval.user_id.in_(
+                select(User.id).where(User.telegram_user_id == telegram_user_id)
+            )
+        )
+    if status == "expired":
+        conditions.append(ToolApproval.expires_at <= now_utc)
+    changed = session.execute(
+        update(ToolApproval)
+        .where(*conditions)
+        .values(status=status, decided_at=now_utc)
+    )
+    if changed.rowcount != 1:
+        return None
+    _transition_approval_task(
+        session,
+        approval,
+        source="awaiting_approval" if source == "pending" else "running",
+        status=task_status or terminal_tasks[status],
+    )
+    session.refresh(approval)
+    return approval
+
+
+def expired_tool_approvals(
+    session: Session, now_utc: int, limit: int = 25
+) -> list[ToolApproval]:
+    if limit <= 0:
+        return []
+    return list(
+        session.scalars(
+            select(ToolApproval)
+            .where(ToolApproval.status == "pending", ToolApproval.expires_at <= now_utc)
+            .order_by(ToolApproval.expires_at, ToolApproval.id)
+            .limit(min(limit, 25))
+        ).all()
+    )
+
+
+def interrupt_tool_approvals(session: Session, now_utc: int) -> list[ToolApproval]:
+    active = list(
+        session.scalars(
+            select(ToolApproval)
+            .where(ToolApproval.status.in_(("pending", "approved")))
+            .order_by(ToolApproval.id)
+        ).all()
+    )
+    affected = []
+    for approval in active:
+        resolved = resolve_tool_approval(
+            session,
+            approval.token,
+            status="interrupted",
+            now_utc=now_utc,
+            allowed_statuses=("pending", "approved"),
+        )
+        if resolved is not None:
+            affected.append(resolved)
+    executed = list(
+        session.scalars(
+            select(ToolApproval)
+            .join(Task, Task.id == ToolApproval.task_id)
+            .where(
+                ToolApproval.status == "executed",
+                Task.user_id == ToolApproval.user_id,
+                Task.status.in_(("pending", "running", "awaiting_approval")),
+            )
+            .order_by(ToolApproval.id)
+        ).all()
+    )
+    for approval in executed:
+        changed = session.execute(
+            update(Task)
+            .where(
+                Task.id == approval.task_id,
+                Task.user_id == approval.user_id,
+                Task.status.in_(("pending", "running", "awaiting_approval")),
+            )
+            .values(status="interrupted", updated_at=utcnow())
+        )
+        if changed.rowcount == 1:
+            affected.append(approval)
+    return affected
 
 
 def find_user(session: Session, telegram_user_id: int) -> User | None:
@@ -377,11 +653,68 @@ def tool_rows_for_request_ids(
     return result
 
 
+_ACCOUNTING_DETAIL_KEYS = {
+    "requested_model",
+    "returned_model",
+    "estimator_version",
+    "pricing_version",
+    "input_price_per_million",
+    "output_price_per_million",
+    "outcome",
+    "usage_known",
+}
+_ATTEMPT_OUTCOMES = {
+    "reserved",
+    "success",
+    "rate_limit",
+    "format_rejected",
+    "timeout",
+    "error",
+    "interrupted",
+}
+
+
+def _validated_accounting_detail(detail: str | None) -> str | None:
+    """Keep accounting metadata separate from prompts, responses, and raw errors."""
+    if detail is None:
+        return None
+    try:
+        values = json.loads(detail)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("Accounting detail must be a JSON object.") from exc
+    if not isinstance(values, dict) or not values.keys() <= _ACCOUNTING_DETAIL_KEYS:
+        raise ValueError("Unsupported accounting detail fields.")
+    for key, value in values.items():
+        if key == "usage_known":
+            if not isinstance(value, bool):
+                raise ValueError("Accounting usage_known must be boolean.")
+        elif key == "returned_model" and value is None:
+            continue
+        elif not isinstance(value, str):
+            raise ValueError("Accounting metadata must use string representations.")
+        elif key == "outcome" and value not in _ATTEMPT_OUTCOMES:
+            raise ValueError("Unsupported accounting attempt outcome.")
+        elif key in {"input_price_per_million", "output_price_per_million"}:
+            try:
+                rate = Decimal(value)
+            except InvalidOperation as exc:
+                raise ValueError("Accounting prices must be finite and nonnegative.") from exc
+            if not rate.is_finite() or rate < 0:
+                raise ValueError("Accounting prices must be finite and nonnegative.")
+    return json.dumps(values, ensure_ascii=False, separators=(",", ":"))
+
+
 def record_llm_call(
     session: Session,
     *,
     task_id: int | None = None,
     user_id: int | None = None,
+    request_message_id: int | None = None,
+    call_group_id: str | None = None,
+    attempt_index: int | None = None,
+    accounting_status: str | None = None,
+    budget_charge_usd: float | None = None,
+    accounting_detail: str | None = None,
     purpose: str,
     provider: str,
     model: str,
@@ -391,9 +724,18 @@ def record_llm_call(
     latency_ms: int,
 ) -> LLMCall:
     """Ghi usage LLM; user_id trực tiếp bảo toàn accounting khi task bị xóa."""
+    if accounting_status not in {None, "reserved", "settled", "unknown"}:
+        raise ValueError("Unsupported attempt accounting status.")
+    accounting_detail = _validated_accounting_detail(accounting_detail)
     call = LLMCall(
         task_id=task_id,
         user_id=user_id,
+        request_message_id=request_message_id,
+        call_group_id=call_group_id,
+        attempt_index=attempt_index,
+        accounting_status=accounting_status,
+        budget_charge_usd=budget_charge_usd,
+        accounting_detail=accounting_detail,
         purpose=purpose,
         provider=provider,
         model=model,
@@ -407,10 +749,110 @@ def record_llm_call(
     return call
 
 
+def finalize_llm_attempt(
+    session: Session,
+    attempt_id: int,
+    *,
+    accounting_status: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    cost_usd: float,
+    budget_charge_usd: float,
+    latency_ms: int,
+    accounting_detail: str,
+) -> bool:
+    """Finalize a reservation once; transaction ownership remains with the caller."""
+    if accounting_status not in {"settled", "unknown"}:
+        raise ValueError("Unsupported attempt accounting transition.")
+    settled = accounting_status == "settled"
+    accounting_detail = _validated_accounting_detail(accounting_detail)
+    result = session.execute(
+        update(LLMCall)
+        .where(LLMCall.id == attempt_id, LLMCall.accounting_status == "reserved")
+        .values(
+            accounting_status=accounting_status,
+            model=model,
+            prompt_tokens=prompt_tokens if settled else 0,
+            completion_tokens=completion_tokens if settled else 0,
+            cost_usd=cost_usd if settled else 0.0,
+            budget_charge_usd=budget_charge_usd if settled else LLMCall.budget_charge_usd,
+            latency_ms=latency_ms,
+            accounting_detail=accounting_detail,
+        )
+    )
+    return result.rowcount == 1
+
+
+def attach_request_llm_calls(
+    session: Session, *, user_id: int, request_message_id: int, task_id: int
+) -> int:
+    """Attribute pre-task calls to the same owner and exact request, never latest."""
+    task_matches = select(Task.id).where(
+        Task.id == task_id,
+        Task.user_id == user_id,
+        Task.request_message_id == request_message_id,
+    ).exists()
+    request_matches = (
+        select(Message.id)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(Message.id == request_message_id, Conversation.user_id == user_id)
+        .exists()
+    )
+    result = session.execute(
+        update(LLMCall)
+        .where(
+            LLMCall.user_id == user_id,
+            LLMCall.request_message_id == request_message_id,
+            LLMCall.task_id.is_(None),
+            task_matches,
+            request_matches,
+        )
+        .values(task_id=task_id)
+    )
+    return int(result.rowcount or 0)
+
+
+def interrupt_reserved_llm_calls(session: Session) -> int:
+    """Mark crash-interrupted attempts unknown without refunding or replaying."""
+    rows = session.execute(
+        select(LLMCall.id, LLMCall.accounting_detail).where(
+            LLMCall.accounting_status == "reserved"
+        )
+    ).all()
+    changed = 0
+    for attempt_id, raw_detail in rows:
+        try:
+            detail = json.loads(raw_detail) if raw_detail is not None else {}
+            if not isinstance(detail, dict):
+                detail = {}
+            detail = {
+                key: value for key, value in detail.items() if key in _ACCOUNTING_DETAIL_KEYS
+            }
+            _validated_accounting_detail(json.dumps(detail))
+        except (TypeError, ValueError):
+            detail = {}
+        detail.update(outcome="interrupted", usage_known=False)
+        result = session.execute(
+            update(LLMCall)
+            .where(LLMCall.id == attempt_id, LLMCall.accounting_status == "reserved")
+            .values(
+                accounting_status="unknown",
+                prompt_tokens=0,
+                completion_tokens=0,
+                cost_usd=0.0,
+                accounting_detail=_validated_accounting_detail(json.dumps(detail)),
+            )
+        )
+        changed += int(result.rowcount or 0)
+    return changed
+
+
 def record_tool_call(
     session: Session,
     *,
     task_id: int | None = None,
+    approval_id: int | None = None,
     tool_name: str,
     params_json: str,
     result_json: str,
@@ -421,6 +863,7 @@ def record_tool_call(
     """Ghi full payload do tool trả về; task_id quy thuộc row cho user."""
     call = ToolCall(
         task_id=task_id,
+        approval_id=approval_id,
         tool_name=tool_name,
         params_json=params_json,
         result_json=result_json,
@@ -441,12 +884,15 @@ def record_trace(
     step_index: int,
     payload: dict,
 ) -> Trace:
-    """Ghi trace JSON theo task/conversation."""
+    """Persist only allowlisted audit metadata; canonical evidence stays private."""
     trace = Trace(
         task_id=task_id,
         conversation_id=conversation_id,
         step_index=step_index,
-        payload_json=json.dumps(payload, ensure_ascii=False),
+        payload_json=json.dumps(
+            safe_event({**payload, "task_id": task_id, "step_index": step_index}),
+            ensure_ascii=False,
+        ),
     )
     session.add(trace)
     session.flush()
@@ -473,24 +919,66 @@ def update_conversation_summary(
     return result.rowcount == 1
 
 
-def user_usage(session: Session, user: User) -> dict[str, Any]:
-    """Tổng hợp usage theo direct user hoặc task ownership, không đếm đôi."""
-    task_ids = select(Task.id).where(Task.user_id == user.id)
-    calls, prompt, completion, cost = session.execute(
+def _llm_usage(session: Session, *conditions: Any) -> dict[str, Any]:
+    """Project logical calls, known usage, and conservative attempt charges."""
+    known = or_(
+        LLMCall.accounting_status.is_(None), LLMCall.accounting_status == "settled"
+    )
+    calls, physical, prompt, completion, cost, charge, unknown = session.execute(
         select(
+            func.coalesce(
+                func.sum(case((LLMCall.call_group_id.is_(None), 1), else_=0)), 0
+            )
+            + func.count(func.distinct(LLMCall.call_group_id)),
             func.count(LLMCall.id),
-            func.coalesce(func.sum(LLMCall.prompt_tokens), 0),
-            func.coalesce(func.sum(LLMCall.completion_tokens), 0),
-            func.coalesce(func.sum(LLMCall.cost_usd), 0.0),
-        ).where((LLMCall.user_id == user.id) | (LLMCall.task_id.in_(task_ids)))
+            func.coalesce(func.sum(case((known, LLMCall.prompt_tokens), else_=0)), 0),
+            func.coalesce(func.sum(case((known, LLMCall.completion_tokens), else_=0)), 0),
+            func.coalesce(func.sum(case((known, LLMCall.cost_usd), else_=0.0)), 0.0),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (LLMCall.accounting_status.is_(None), LLMCall.cost_usd),
+                        else_=func.coalesce(LLMCall.budget_charge_usd, 0.0),
+                    )
+                ),
+                0.0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (LLMCall.accounting_status.in_(("reserved", "unknown")), 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+        ).where(*conditions)
     ).one()
+    known_cost = round(float(cost), 9)
     return {
         "llm_calls": int(calls),
+        "physical_attempts": int(physical),
         "prompt_tokens": int(prompt),
         "completion_tokens": int(completion),
         "total_tokens": int(prompt) + int(completion),
         "cost_usd": round(float(cost), 6),
+        "known_cost_usd": known_cost,
+        "budget_charge_usd": round(float(charge), 9),
+        "unknown_attempts": int(unknown),
     }
+
+
+def user_usage(session: Session, user: User) -> dict[str, Any]:
+    """Aggregate direct user or legacy task ownership without counting twice."""
+    task_ids = select(Task.id).where(Task.user_id == user.id)
+    return _llm_usage(
+        session, (LLMCall.user_id == user.id) | (LLMCall.task_id.in_(task_ids))
+    )
+
+
+def total_usage(session: Session) -> dict[str, Any]:
+    """Return the same accounting projection across all owners and legacy rows."""
+    return _llm_usage(session)
 
 
 def create_reminder(
@@ -522,6 +1010,19 @@ def reminder_for_owner(session: Session, user_id: int, reminder_id: int) -> Remi
     )
 
 
+def _reminder_snapshot_conditions(expected: Reminder | None) -> tuple:
+    if expected is None:
+        return ()
+    return (
+        Reminder.id == expected.id,
+        Reminder.user_id == expected.user_id,
+        Reminder.status == expected.status,
+        Reminder.message == expected.message,
+        Reminder.due_at_utc == expected.due_at_utc,
+        Reminder.timezone == expected.timezone,
+    )
+
+
 def update_pending_reminder(
     session: Session,
     *,
@@ -530,6 +1031,7 @@ def update_pending_reminder(
     message: str | None,
     due_at_utc: int | None,
     timezone: str,
+    expected: Reminder | None = None,
 ) -> Reminder | None:
     values: dict[str, Any] = {"updated_at": utcnow()}
     if message is not None:
@@ -556,6 +1058,7 @@ def update_pending_reminder(
             Reminder.id == reminder_id,
             Reminder.user_id == user_id,
             Reminder.status.in_(allowed_statuses),
+            *_reminder_snapshot_conditions(expected),
         )
         .values(**values)
     )
@@ -564,13 +1067,20 @@ def update_pending_reminder(
     return reminder_for_owner(session, user_id, reminder_id)
 
 
-def cancel_pending_reminder(session: Session, *, user_id: int, reminder_id: int) -> Reminder | None:
+def cancel_pending_reminder(
+    session: Session,
+    *,
+    user_id: int,
+    reminder_id: int,
+    expected: Reminder | None = None,
+) -> Reminder | None:
     result = session.execute(
         update(Reminder)
         .where(
             Reminder.id == reminder_id,
             Reminder.user_id == user_id,
             Reminder.status == "pending",
+            *_reminder_snapshot_conditions(expected),
         )
         .values(status="cancelled", updated_at=utcnow())
     )
@@ -876,6 +1386,12 @@ def wipe_session(session: Session, user: User) -> dict[str, int]:
         session.scalars(select(Conversation.id).where(Conversation.user_id == user.id)).all()
     )
     task_ids = list(session.scalars(select(Task.id).where(Task.user_id == user.id)).all())
+    request_ids = list(
+        session.scalars(
+            select(Message.id).where(Message.conversation_id.in_(conversation_ids))
+        ).all()
+    )
+    request_id_set = set(request_ids)
     reminder_count = int(
         session.scalar(select(func.count(Reminder.id)).where(Reminder.user_id == user.id)) or 0
     )
@@ -897,18 +1413,53 @@ def wipe_session(session: Session, user: User) -> dict[str, int]:
     if delivering:
         raise ReminderDeliveryInProgress
 
-    if task_ids:
-        linked_calls = list(
-            session.scalars(select(LLMCall).where(LLMCall.task_id.in_(task_ids))).all()
-        )
-        for call in linked_calls:
-            if call.user_id is not None and call.user_id != user.id:
-                raise ValueError("LLMCall có ownership mâu thuẫn; từ chối xóa")
-            call.user_id = user.id
-            call.task_id = None
-        session.execute(delete(Step).where(Step.task_id.in_(task_ids)))
-        session.execute(delete(ToolCall).where(ToolCall.task_id.in_(task_ids)))
     task_id_set = set(task_ids)
+    approval_rows = list(
+        session.scalars(
+            select(ToolApproval).where(
+                or_(ToolApproval.user_id == user.id, ToolApproval.task_id.in_(task_ids))
+            )
+        ).all()
+    )
+    for approval in approval_rows:
+        if approval.user_id != user.id or approval.task_id not in task_id_set:
+            raise ValueError("ToolApproval có ownership mâu thuẫn; từ chối xóa")
+    approval_ids = [approval.id for approval in approval_rows]
+    tool_filter = or_(
+        ToolCall.task_id.in_(task_ids), ToolCall.approval_id.in_(approval_ids)
+    )
+    for call in session.scalars(select(ToolCall).where(tool_filter)):
+        if (
+            call.task_id is not None and call.task_id not in task_id_set
+            or call.approval_id is not None and call.approval_id not in approval_ids
+        ):
+            raise ValueError("ToolCall có ownership mâu thuẫn; từ chối xóa")
+    linked_calls = list(
+        session.scalars(
+            select(LLMCall).where(
+                or_(
+                    LLMCall.user_id == user.id,
+                    LLMCall.task_id.in_(task_ids),
+                    LLMCall.request_message_id.in_(request_ids),
+                )
+            )
+        ).all()
+    )
+    for call in linked_calls:
+        if (
+            call.user_id is not None and call.user_id != user.id
+            or call.task_id is not None and call.task_id not in task_id_set
+            or call.request_message_id is not None
+            and call.request_message_id not in request_id_set
+        ):
+            raise ValueError("LLMCall có ownership mâu thuẫn; từ chối xóa")
+        call.user_id = user.id
+        call.task_id = None
+        call.request_message_id = None
+    if task_ids:
+        session.execute(delete(Step).where(Step.task_id.in_(task_ids)))
+        session.execute(delete(ToolCall).where(tool_filter))
+        session.execute(delete(ToolApproval).where(ToolApproval.id.in_(approval_ids)))
     conversation_id_set = set(conversation_ids)
     trace_filter = []
     if task_ids:
