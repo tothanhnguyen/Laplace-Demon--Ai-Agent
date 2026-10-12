@@ -5,21 +5,24 @@ import queue
 import sqlite3
 import threading
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import inspect, select, text
 
 from laplace import repo
-from laplace.context import message_chars, parse_summary
+from laplace.config import Settings
+from laplace.context import build_context, group_history, message_chars, parse_summary
 from laplace.db import get_engine, init_db, reset_engine_for_tests, session_scope
 from laplace.llm.base import LLMResult
+from laplace.llm.mock import account_mock_result
 from laplace.models import (
     Conversation,
     LLMCall,
     Message,
+    Reminder,
     Step,
     Task,
+    ToolApproval,
     ToolCall,
     Trace,
     User,
@@ -43,7 +46,9 @@ def _isolated_database(monkeypatch) -> None:
     reset_engine_for_tests("sqlite:///:memory:")
     init_db()
     monkeypatch.setattr(
-        chat, "Settings", lambda: SimpleNamespace(context_max_chars=12_000)
+        chat,
+        "Settings",
+        lambda: Settings(_env_file=None, context_max_chars=12_000, timezone="UTC"),
     )
     yield
     reset_engine_for_tests(None)
@@ -115,9 +120,7 @@ def test_sprint2_schema_migration_is_additive_and_idempotent(tmp_path: Path) -> 
         assert session.scalar(select(Message.content).where(Message.id == 1)) == "preserve me"
         task = session.get(Task, 1)
         conversation = session.execute(
-            text(
-                "SELECT summary, summary_until_message_id FROM conversations WHERE id=1"
-            )
+            text("SELECT summary, summary_until_message_id FROM conversations WHERE id=1")
         ).one()
         assert task is not None
         assert task.request_message_id is None
@@ -263,10 +266,7 @@ def test_forget_is_user_isolated_fk_safe_idempotent_and_preserves_usage() -> Non
     with session_scope() as session:
         assert session.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
         assert session.execute(text("PRAGMA foreign_key_check")).all() == []
-        assert (
-            session.scalars(select(Task).where(Task.user_id == alice_id)).all()
-            == []
-        )
+        assert session.scalars(select(Task).where(Task.user_id == alice_id)).all() == []
         remaining_tasks = list(session.scalars(select(Task)))
         remaining_steps = list(session.scalars(select(Step)))
         remaining_tools = list(session.scalars(select(ToolCall)))
@@ -276,9 +276,7 @@ def test_forget_is_user_isolated_fk_safe_idempotent_and_preserves_usage() -> Non
         assert [step.task_id for step in remaining_steps] == [remaining_tasks[0].id]
         assert [tool.task_id for tool in remaining_tools] == [remaining_tasks[0].id]
         assert [trace.task_id for trace in remaining_traces] == [remaining_tasks[0].id]
-        alice_calls = session.scalars(
-            select(LLMCall).where(LLMCall.user_id == alice_id)
-        ).all()
+        alice_calls = session.scalars(select(LLMCall).where(LLMCall.user_id == alice_id)).all()
         assert len(alice_calls) == 3
         assert all(call.task_id is None for call in alice_calls)
         assert session.scalar(select(User).where(User.id == bob_id)) is not None
@@ -312,14 +310,15 @@ def test_forget_rejects_cross_owner_trace_and_rolls_back() -> None:
         forget_memory(1001)
 
     with session_scope() as session:
-        assert session.scalar(
-            select(Task).where(Task.user_id == alice_id)
-        ) is not None
-        assert session.scalar(
-            select(Conversation)
-            .join(User, Conversation.user_id == User.id)
-            .where(User.telegram_user_id == 1001)
-        ) is not None
+        assert session.scalar(select(Task).where(Task.user_id == alice_id)) is not None
+        assert (
+            session.scalar(
+                select(Conversation)
+                .join(User, Conversation.user_id == User.id)
+                .where(User.telegram_user_id == 1001)
+            )
+            is not None
+        )
 
 
 def test_memory_snapshot_tolerates_legacy_json_top_level_types() -> None:
@@ -358,9 +357,9 @@ def test_memory_snapshot_tolerates_legacy_json_top_level_types() -> None:
         observations = repo.tool_rows_for_request_ids(session, [request.id])
 
     assert snapshot["recent_tasks"][0]["remaining"] is None
-    assert snapshot["recent_tasks"][0]["tools"][0]["source"] == ""
+    assert snapshot["recent_tasks"][0]["tools"][0]["sources"] == []
     assert observations[0]["payload"] == ""
-    assert observations[0]["source"] is None
+    assert observations[0]["sources"] == []
 
 
 def test_compaction_queries_bound_large_message_and_tool_payloads() -> None:
@@ -383,12 +382,17 @@ def test_compaction_queries_bound_large_message_and_tool_payloads() -> None:
         session.add(
             ToolCall(
                 task_id=task.id,
-                tool_name="read_file",
-                params_json='{"path":"large.txt"}',
+                tool_name="fixture",
+                params_json='{"path":"must-not-be-a-source.txt"}',
                 result_json=json.dumps(
                     {
                         "ok": True,
-                        "payload": "TOOL_HEAD" + "t" * 5_000 + "TOOL_TAIL",
+                        "data": "TOOL_HEAD" + "t" * 5_000 + "TOOL_TAIL",
+                        "error": None,
+                        "error_code": None,
+                        "retryable": False,
+                        "sources": ["document:fixture#unit-1"],
+                        "latency_ms": 1,
                     }
                 ),
                 ok=True,
@@ -411,6 +415,7 @@ def test_compaction_queries_bound_large_message_and_tool_payloads() -> None:
     assert len(tools[0]["payload"]) <= repo.DB_EXCERPT_CHARS
     assert "TOOL_HEAD" in tools[0]["payload"]
     assert "TOOL_TAIL" in tools[0]["payload"]
+    assert tools[0]["sources"] == ["document:fixture#unit-1"]
 
 
 def test_turn_reservation_is_per_user_and_cancel_only_targets_chat() -> None:
@@ -447,21 +452,23 @@ class _BlockingToolProvider:
         self.allow_return = threading.Event()
         self.calls = 0
 
-    def complete(self, messages, *, json_schema=None) -> LLMResult:
+    def complete(self, messages, *, options, json_schema=None) -> LLMResult:
         self.calls += 1
-        self.started.set()
-        if not self.allow_return.wait(timeout=5):
-            raise RuntimeError("test provider was not released")
-        return LLMResult(
-            parsed={
+        result = account_mock_result(
+            LLMResult(parsed={
                 "action": "tool",
                 "tool": "read_file",
                 "params": {"path": "unused.txt"},
             },
             model="blocking-fixture",
             prompt_tokens=7,
-            completion_tokens=3,
+            completion_tokens=3,),
+            messages, options=options, json_schema=json_schema,
         )
+        self.started.set()
+        if not self.allow_return.wait(timeout=5):
+            raise RuntimeError("test provider was not released")
+        return result
 
 
 def test_cooperative_cancel_waits_for_provider_and_prevents_the_tool(
@@ -487,8 +494,6 @@ def test_cooperative_cancel_waits_for_provider_and_prevents_the_tool(
             )
         except BaseException as exc:
             outcomes.put(exc)
-
-
 
     worker = threading.Thread(target=run_worker)
     worker.start()
@@ -518,27 +523,33 @@ def test_cooperative_cancel_waits_for_provider_and_prevents_the_tool(
     assert memory["tasks"] == 0
     assert memory["tool_calls"] == 0
     with session_scope() as session:
-        traces = [
-            json.loads(row.payload_json)
-            for row in session.scalars(select(Trace)).all()
-        ]
+        traces = [json.loads(row.payload_json) for row in session.scalars(select(Trace)).all()]
     assert [trace["event"] for trace in traces] == ["cancelled"]
+
+
 class _SummaryProvider:
     name = "summary-fixture"
 
-    def complete(self, messages, *, json_schema=None) -> LLMResult:
-        return LLMResult(
-            parsed={"version": 1, "entries": [], "omitted_count": 0},
+    def complete(self, messages, *, options, json_schema=None) -> LLMResult:
+        return account_mock_result(
+            LLMResult(parsed={"version": 1, "entries": [], "omitted_count": 0},
             model="summary-fixture",
             prompt_tokens=2,
-            completion_tokens=1,
+            completion_tokens=1,),
+            messages, options=options, json_schema=json_schema,
         )
 
 
-def test_compaction_usage_write_failure_does_not_advance_watermark(
-    monkeypatch,
-) -> None:
+def test_compaction_settlement_failure_does_not_advance_watermark(monkeypatch) -> None:
     user_id = 5100
+    monkeypatch.setattr(
+        chat,
+        "Settings",
+        lambda: Settings(
+            _env_file=None,
+            context_max_chars=len(system_message()["content"]) + 2_500,
+        ),
+    )
     with session_scope() as session:
         user = repo.get_or_create_user(session, user_id, "usage-failure")
         conversation = repo.get_or_create_conversation(session, user)
@@ -550,27 +561,20 @@ def test_compaction_usage_write_failure_does_not_advance_watermark(
                 f"old-{index} " + "x" * 2_000,
             )
             repo.add_message(session, conversation, "assistant", "stored")
-        request = repo.add_message(session, conversation, "user", "current")
-        conversation_id = conversation.id
-        request_id = request.id
-        internal_user_id = user.id
 
-    def fail_usage_write(*args, **kwargs):
-        raise RuntimeError("usage write failed")
+    def fail_settlement(*args, **kwargs):
+        raise RuntimeError("settlement write failed")
 
-    monkeypatch.setattr(chat, "_record_llm_result", fail_usage_write)
-    with pytest.raises(RuntimeError, match="usage write failed"):
-        chat._maybe_compact(
-            provider=_SummaryProvider(),
-            recorder=chat._TurnRecorder(),
-            user_id=internal_user_id,
-            conversation_id=conversation_id,
-            request_message_id=request_id,
-            request_text="current",
-            max_chars=len(system_message()["content"]) + 2_500,
-        )
+    monkeypatch.setattr(repo, "finalize_llm_attempt", fail_settlement)
+    lease = try_reserve_turn(user_id)
+    assert lease is not None
+    reply = _run_reserved_message(
+        lease, user_id, "usage-failure", "current", provider=_SummaryProvider(),
+    )
 
     assert _latest_summary(user_id) == (None, None)
+    assert reply.usage["unknown_attempts"] == 1
+    assert reply.usage["physical_attempts"] == 1
 
 
 class _ContextAwareMock:
@@ -580,25 +584,22 @@ class _ContextAwareMock:
         self.fact = fact
         self.calls: list[list[dict[str, str]]] = []
 
-    def complete(self, messages, *, json_schema=None) -> LLMResult:
+    def complete(self, messages, *, options, json_schema=None) -> LLMResult:
         snapshot = [dict(message) for message in messages]
         self.calls.append(snapshot)
         joined = "\n".join(message["content"] for message in snapshot)
-        asks_for_recall = any(
-            message["content"] == "recall the early fact" for message in snapshot
-        )
+        asks_for_recall = any(message["content"] == "recall the early fact" for message in snapshot)
         answer = "recalled" if asks_for_recall and self.fact in joined else "ok"
-        return LLMResult(
-            parsed={"action": "final", "final_answer": answer},
+        return account_mock_result(
+            LLMResult(parsed={"action": "final", "final_answer": answer},
             model="context-aware-mock",
             prompt_tokens=1,
-            completion_tokens=1,
+            completion_tokens=1,),
+            messages, options=options, json_schema=json_schema,
         )
 
 
-def _run_context_turn(
-    user_id: int, text_value: str, provider: _ContextAwareMock
-) -> ChatReply:
+def _run_context_turn(user_id: int, text_value: str, provider: _ContextAwareMock) -> ChatReply:
     lease = try_reserve_turn(user_id)
     assert lease is not None
     return _run_reserved_message(
@@ -607,6 +608,24 @@ def _run_context_turn(
         "summary-user",
         text_value,
         provider=provider,
+    )
+
+
+def _runtime_system_chars() -> int:
+    return len(
+        system_message(
+            {
+                "now_utc": "2026-09-21T00:00:00+00:00",
+                "timezone": "UTC",
+                "transport": "telegram",
+                "is_private_chat": True,
+                "required_effects": [],
+                "effect_outcomes": {},
+                "document_progress": {},
+                "completed_documents": [],
+                "attachment_ids": [],
+            }
+        )["content"]
     )
 
 
@@ -632,22 +651,32 @@ def test_compaction_recalls_early_fact_once_and_respects_every_call_budget(
     user_id = 5101
     long_message_chars = 1_000
     seed_count = 8
-    system_chars = len(system_message()["content"])
-    budget = (
-        system_chars
-        + seed_count * long_message_chars
-        + (seed_count - 1) * len("ok")
-    )
+    requests = []
+    for index in range(seed_count):
+        prefix = f"turn-{index}: " + (fact + " " if index == 0 else "")
+        requests.append(prefix + (" " * (long_message_chars - len(prefix))))
+    history = [
+        message
+        for request in requests[:-1]
+        for message in (
+            {"role": "user", "content": request},
+            {"role": "assistant", "content": "ok"},
+        )
+    ]
+    budget = build_context(
+        system_message={"role": "system", "content": "x" * _runtime_system_chars()},
+        history_groups=group_history(history),
+        request_message={"role": "user", "content": requests[-1]},
+        max_chars=None,
+    ).char_count
     monkeypatch.setattr(
-        chat, "Settings", lambda: SimpleNamespace(context_max_chars=budget)
+        chat,
+        "Settings",
+        lambda: Settings(_env_file=None, context_max_chars=budget, timezone="UTC"),
     )
 
     watermarks: list[int | None] = []
-    for index in range(seed_count):
-        prefix = f"turn-{index}: "
-        if index == 0:
-            prefix += fact + " "
-        request = prefix + (" " * (long_message_chars - len(prefix)))
+    for request in requests:
         assert len(request) == long_message_chars
         reply = _run_context_turn(user_id, request, provider)
         assert reply.text == "ok"
@@ -665,18 +694,14 @@ def test_compaction_recalls_early_fact_once_and_respects_every_call_budget(
     assert compacted_watermark is not None
     summary_document = parse_summary(persisted_summary)
     source_ids = [
-        source_id
-        for entry in summary_document.entries
-        for source_id in entry.source_message_ids
+        source_id for entry in summary_document.entries for source_id in entry.source_message_ids
     ]
     assert any(fact in entry.text for entry in summary_document.entries)
     assert len(source_ids) == len(set(source_ids))
 
     trigger_input = provider.calls[-1]
     state_messages = [
-        message
-        for message in trigger_input
-        if message["content"].startswith("SESSION_STATE_DATA")
+        message for message in trigger_input if message["content"].startswith("SESSION_STATE_DATA")
     ]
     assert len(state_messages) == 1
     state = json.loads(state_messages[0]["content"].split("\n", 1)[1])
@@ -694,15 +719,11 @@ def test_compaction_recalls_early_fact_once_and_respects_every_call_budget(
 
     assert stable_summary == persisted_summary
     assert stable_watermark == compacted_watermark
-    assert (
-        parse_summary(stable_summary).model_dump()
-        == summary_document.model_dump()
-    )
+    assert parse_summary(stable_summary).model_dump() == summary_document.model_dump()
     numeric_watermarks = [watermark or 0 for watermark in watermarks]
     assert numeric_watermarks == sorted(numeric_watermarks)
     assert numeric_watermarks[-2] > numeric_watermarks[-3]
     assert all(message_chars(messages) <= budget for messages in provider.calls)
-
 
 
 def test_oversized_required_request_skips_compaction_and_provider(
@@ -710,9 +731,11 @@ def test_oversized_required_request_skips_compaction_and_provider(
 ) -> None:
     provider = _ContextAwareMock("unused")
     user_id = 5102
-    budget = len(system_message()["content"]) + 8
+    budget = _runtime_system_chars() + 8
     monkeypatch.setattr(
-        chat, "Settings", lambda: SimpleNamespace(context_max_chars=budget)
+        chat,
+        "Settings",
+        lambda: Settings(_env_file=None, context_max_chars=budget, timezone="UTC"),
     )
     with session_scope() as session:
         user = repo.get_or_create_user(session, user_id, "overflow-user")
@@ -732,9 +755,11 @@ def test_oversized_required_request_skips_compaction_and_provider(
 def test_two_page_compaction_backlog_is_explicit_in_context(monkeypatch) -> None:
     provider = _ContextAwareMock("unused")
     user_id = 5103
-    budget = len(system_message()["content"]) + 2_200
+    budget = _runtime_system_chars() + 2_200
     monkeypatch.setattr(
-        chat, "Settings", lambda: SimpleNamespace(context_max_chars=budget)
+        chat,
+        "Settings",
+        lambda: Settings(_env_file=None, context_max_chars=budget, timezone="UTC"),
     )
     with session_scope() as session:
         user = repo.get_or_create_user(session, user_id, "backlog-user")
@@ -759,6 +784,7 @@ def test_two_page_compaction_backlog_is_explicit_in_context(monkeypatch) -> None
     assert len(state_messages) == 1
     assert "UNSUMMARIZED_HISTORY_BACKLOG" in state_messages[0]["content"]
 
+
 def test_forget_keeps_legacy_unowned_tool_rows_and_counts_them() -> None:
     with session_scope() as session:
         repo.get_or_create_user(session, 6101, "legacy")
@@ -771,3 +797,93 @@ def test_forget_keeps_legacy_unowned_tool_rows_and_counts_them() -> None:
     assert result["legacy_unowned_tool_calls"] == 1
     with session_scope() as session:
         assert session.scalar(select(ToolCall.tool_name)) == "read_file"
+
+
+def _persist_approval_audit(user_id: int, telegram_id: int) -> tuple[int, int, int]:
+    """Seed the FK graph through real paired repository transitions."""
+    with session_scope() as session:
+        task = session.scalar(select(Task).where(Task.user_id == user_id))
+        approval = repo.create_tool_approval(
+            session,
+            token=f"forget-generation-{telegram_id}",
+            user_id=user_id,
+            task_id=task.id,
+            step_index=1,
+            tool_name="create_reminder",
+            risk_level="EXTERNAL_SEND",
+            params_json="{}",
+            public_args_hash="a" * 64,
+            resource_fingerprint=None,
+            preview_json='{"policy_version":1}',
+            created_at=100,
+            expires_at=200,
+            chat_id=telegram_id,
+        )
+        assert repo.bind_approval_preview(
+            session, approval.id, chat_id=telegram_id, message_id=7, now_utc=110
+        )
+        assert repo.claim_tool_approval(
+            session, approval.token, telegram_user_id=telegram_id,
+            chat_id=telegram_id, message_id=7, now_utc=120,
+        ) is not None
+        call = repo.record_tool_call(
+            session, task_id=task.id, approval_id=approval.id,
+            tool_name="create_reminder", params_json="{}", result_json="{}",
+            ok=False, error="pre-commit failure", latency_ms=0,
+        )
+        return task.id, approval.id, call.id
+
+
+def test_forget_deletes_approval_fk_children_and_preserves_other_owner() -> None:
+    alice_id, bob_id, alice_usage, bob_usage = _seed_owned_memory()
+    alice_task, alice_approval, alice_call = _persist_approval_audit(alice_id, 1001)
+    bob_task, bob_approval, bob_call = _persist_approval_audit(bob_id, 2002)
+    assert forget_memory(1001)[0] == "deleted"
+    with session_scope() as session:
+        assert session.get(ToolCall, alice_call) is None
+        assert session.get(ToolApproval, alice_approval) is None
+        assert session.get(Task, alice_task) is None
+        assert session.get(ToolCall, bob_call).approval_id == bob_approval
+        assert session.get(ToolApproval, bob_approval).task_id == bob_task
+        assert session.get(ToolApproval, bob_approval).status == "approved"
+        assert repo.user_usage(session, session.get(User, alice_id)) == alice_usage
+        assert repo.user_usage(session, session.get(User, bob_id)) == bob_usage
+        assert session.execute(text("PRAGMA foreign_key_check")).all() == []
+    assert forget_memory(1001)[0] == "deleted"
+
+
+def test_forget_delivery_conflict_rolls_back_approval_and_all_memory() -> None:
+    alice_id, _, alice_usage, _ = _seed_owned_memory()
+    task_id, approval_id, call_id = _persist_approval_audit(alice_id, 1001)
+    with session_scope() as session:
+        pending = repo.create_reminder(
+            session, user_id=alice_id, message="pending", timezone="UTC", due_at_utc=1_000
+        )
+        claimed = repo.create_reminder(
+            session, user_id=alice_id, message="in flight", timezone="UTC", due_at_utc=1_001
+        )
+        claimed.status = "delivering"
+        pending_id, claimed_id = pending.id, claimed.id
+    assert forget_memory(1001) == ("delivery_busy", None)
+    with session_scope() as session:
+        assert session.get(Reminder, pending_id).status == "pending"
+        assert session.get(Reminder, claimed_id).status == "delivering"
+        assert session.get(ToolApproval, approval_id).status == "approved"
+        assert session.get(ToolCall, call_id).approval_id == approval_id
+        assert session.get(Task, task_id).status == "running"
+        assert repo.user_usage(session, session.get(User, alice_id)) == alice_usage
+        assert session.execute(text("PRAGMA foreign_key_check")).all() == []
+
+
+def test_forget_cross_owner_approval_graph_refuses_and_rolls_back() -> None:
+    alice_id, bob_id, _, _ = _seed_owned_memory()
+    task_id, approval_id, call_id = _persist_approval_audit(alice_id, 1001)
+    with session_scope() as session:
+        session.get(ToolApproval, approval_id).user_id = bob_id
+    with pytest.raises(ValueError, match="ownership mâu thuẫn"):
+        forget_memory(1001)
+    with session_scope() as session:
+        assert session.get(ToolApproval, approval_id).user_id == bob_id
+        assert session.get(ToolCall, call_id).approval_id == approval_id
+        assert session.get(Task, task_id) is not None
+        assert session.execute(text("PRAGMA foreign_key_check")).all() == []

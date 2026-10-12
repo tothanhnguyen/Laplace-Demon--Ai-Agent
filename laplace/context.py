@@ -9,10 +9,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 TOOL_OBSERVATION_MAX_CHARS = 1_200
+DOCUMENT_TOOL_OBSERVATION_MAX_CHARS = 6_000
 TASK_CARD_MAX_CHARS = 1_000
 SUMMARY_MAX_CHARS = 2_000
 INVALID_REPLY_MAX_CHARS = 1_000
-VALIDATION_ERROR_MAX_CHARS = 500
+RETRY_ERROR_CODES = frozenset(
+    {"invalid_action_schema", "invalid_json_object", "final_action_required"}
+)
 
 
 @dataclass(frozen=True)
@@ -37,8 +40,35 @@ def message_chars(messages: list[dict[str, str]]) -> int:
     return sum(len(message["content"]) for message in messages)
 
 
+def lower_trust_message(
+    kind: Literal["history", "model_output", "retry", "summary"], data: Any
+) -> dict[str, str]:
+    """Encode external/model text as data, never as a provider instruction role."""
+    return {
+        "role": "user",
+        "content": f"UNTRUSTED_{kind.upper()}_DATA_JSON:\n"
+        + json.dumps(data, ensure_ascii=False),
+    }
+
+
 def _copy_group(group: MessageGroup) -> list[dict[str, str]]:
-    return [dict(message) for message in group.messages]
+    return [
+        dict(message)
+        if message.get("role") == "user"
+        else lower_trust_message("model_output", dict(message))
+        for message in group.messages
+    ]
+
+
+def _history_message(group: MessageGroup) -> dict[str, str]:
+    return lower_trust_message(
+        "history",
+        {
+            "messages": [dict(message) for message in group.messages],
+            "incomplete": bool(group.messages)
+            and group.messages[-1].get("role") != "assistant",
+        },
+    )
 
 
 def group_history(messages: list[dict[str, str]]) -> list[MessageGroup]:
@@ -55,14 +85,7 @@ def group_history(messages: list[dict[str, str]]) -> list[MessageGroup]:
             groups.append(MessageGroup(tuple(current)))
             current = []
     if current:
-        labeled = [dict(message) for message in current]
-        tail = dict(labeled[-1])
-        tail["content"] = (
-            "INCOMPLETE_HISTORY_REQUEST (no terminal assistant response):\n"
-            + tail.get("content", "")
-        )
-        labeled[-1] = tail
-        groups.append(MessageGroup(tuple(labeled)))
+        groups.append(MessageGroup(tuple(current)))
     return groups
 
 
@@ -121,7 +144,7 @@ def build_context(
         if state is not None:
             result.append(dict(state))
         for group in history:
-            result.extend(_copy_group(group))
+            result.append(_history_message(group))
         result.append(dict(request_message))
         for group in execution:
             result.extend(_copy_group(group))
@@ -146,11 +169,7 @@ def build_context(
         state = _session_state(task_card, None)
         dropped += 1
         messages = assemble()
-    if (
-        state is not None
-        and message_chars(messages) > max_chars
-        and not task_card
-    ):
+    if state is not None and message_chars(messages) > max_chars and not task_card:
         state = None
         dropped += 1
         messages = assemble()
@@ -169,38 +188,46 @@ def build_context(
 def bounded_tool_observation(
     *,
     tool_name: str,
-    ok: bool,
-    payload: str,
+    result: dict[str, Any],
     tool_call_id: int,
-    source: str | None = None,
     limit: int = TOOL_OBSERVATION_MAX_CHARS,
 ) -> dict[str, str]:
-    """Đóng gói excerpt JSON hữu hạn; ID chỉ dùng để truy vết trong DB."""
+    """Keep canonical failure/source metadata while bounding untrusted data."""
+
+    raw_sources = result.get("sources")
+    sources = raw_sources if isinstance(raw_sources, list) else []
+    visible_sources = [str(source) for source in sources[:5]]
+    data_text = json.dumps(result.get("data"), ensure_ascii=False, sort_keys=True)
     base = {
-        "tool": _bounded_text(tool_name, 100),
-        "ok": ok,
+        "tool": _bounded_text(tool_name, 64),
         "tool_call_id": tool_call_id,
-        "source": _bounded_text(source or "", 200),
-        "payload_chars": len(payload),
+        "ok": bool(result.get("ok")),
+        "error": _bounded_text(str(result.get("error") or ""), 200),
+        "error_code": result.get("error_code"),
+        "retryable": bool(result.get("retryable")),
+        "sources": visible_sources,
+        "sources_omitted": max(0, len(sources) - len(visible_sources)),
+        "latency_ms": int(result.get("latency_ms") or 0),
+        "data_chars": len(data_text),
         "truncated": False,
-        "excerpt": payload,
+        "data_excerpt": data_text,
     }
     prefix = "UNTRUSTED_TOOL_DATA_JSON:\n"
     suffix = "\nDecide the next action as one JSON object."
 
     def render(excerpt: str) -> str:
         data = dict(base)
-        data["excerpt"] = excerpt
-        data["truncated"] = excerpt != payload
+        data["data_excerpt"] = excerpt
+        data["truncated"] = excerpt != data_text
         return prefix + json.dumps(data, ensure_ascii=False) + suffix
 
-    content = render(payload)
+    content = render(data_text)
     if len(content) > limit:
-        low, high = 0, len(payload)
+        low, high = 0, len(data_text)
         best = ""
         while low <= high:
             size = (low + high) // 2
-            candidate = _bounded_text(payload, size) if size else ""
+            candidate = _bounded_text(data_text, size) if size else ""
             rendered = render(candidate)
             if len(rendered) <= limit:
                 best = candidate
@@ -209,36 +236,39 @@ def bounded_tool_observation(
                 high = size - 1
         content = render(best)
     if len(content) > limit:
-        raise ValueError("metadata của tool observation vượt giới hạn")
+        while base["sources"] and len(render("")) > limit:
+            base["sources"].pop()
+            base["sources_omitted"] = len(sources) - len(base["sources"])
+        base["sources_omitted"] = max(0, len(sources) - len(base["sources"]))
+        base["error"] = _bounded_text(str(base["error"]), 100)
+        content = render("")
+    if len(content) > limit:
+        raise ValueError("tool observation metadata exceeds its hard limit")
     return {"role": "user", "content": content}
 
 
 def retry_group(raw_reply: str | None, error: str) -> MessageGroup:
-    """Tạo cặp reply-invalid/lỗi validation hữu hạn, không để message mồ côi."""
+    """Keep invalid model output and stable validation codes in one data envelope."""
     return MessageGroup(
         (
-            {
-                "role": "assistant",
-                "content": _bounded_text(raw_reply or "(empty)", INVALID_REPLY_MAX_CHARS),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "The previous reply did not match the JSON schema. Error: "
-                    + _bounded_text(error, VALIDATION_ERROR_MAX_CHARS)
-                    + "\nReply with one valid JSON object only."
-                ),
-            },
+            lower_trust_message(
+                "retry",
+                {
+                    "raw_reply": _bounded_text(raw_reply or "", INVALID_REPLY_MAX_CHARS),
+                    "error_code": error if error in RETRY_ERROR_CODES else "invalid_action_schema",
+                },
+            ),
         )
     )
 
 
-def render_task_card(snapshot: dict[str, Any]) -> str:
-    """Render bounded task data while retaining every core state field."""
+def render_task_card(snapshot: dict[str, Any], *, budget: dict[str, Any] | None = None) -> str:
+    """Render live cumulative limits, or the historical five-step projection."""
     tools = snapshot.get("tools") or []
-    tool_text = ", ".join(
-        f"{item['name']} (x{item['count']}, lỗi {item['failed']})" for item in tools
-    ) or "chưa có"
+    tool_text = (
+        ", ".join(f"{item['name']} (x{item['count']}, lỗi {item['failed']})" for item in tools)
+        or "chưa có"
+    )
     criteria_value = snapshot.get("criteria")
     criteria = (
         [str(item) for item in criteria_value]
@@ -251,15 +281,33 @@ def render_task_card(snapshot: dict[str, Any]) -> str:
         if isinstance(remaining, list)
         else "Chưa được mô hình xác định"
     )
+    status = str(snapshot.get("status", "running"))
+    if status == "awaiting_approval":
+        remaining_text = "Chờ xác nhận/hủy đề xuất; thao tác chưa thực thi."
+        status = "awaiting_approval — chờ xác nhận"
+    field_limit = 140 if budget is not None else 180
+    steps_used = budget["steps_used"] if budget is not None else snapshot.get("tool_count", 0)
+    max_steps = budget["max_steps"] if budget is not None else 5
     lines = [
-        f"Mục tiêu: {_bounded_text(str(snapshot.get('goal', '')), 220)}",
-        f"Tiêu chí hoàn thành: {_bounded_text('; '.join(criteria), 180)}",
+        f"Mục tiêu: {_bounded_text(str(snapshot.get('goal', '')), 180 if budget else 220)}",
+        f"Tiêu chí hoàn thành: {_bounded_text('; '.join(criteria), field_limit)}",
         f"Bước hiện tại: {snapshot.get('decision_index', 0) + 1}; "
-        f"công cụ {snapshot.get('tool_count', 0)}/5",
-        f"Công cụ đã dùng: {_bounded_text(tool_text, 180)}",
-        f"Còn lại: {_bounded_text(remaining_text, 180)}",
-        f"Trạng thái: {_bounded_text(str(snapshot.get('status', 'running')), 40)}",
+        f"công cụ {steps_used}/{max_steps}",
+        f"Công cụ đã dùng: {_bounded_text(tool_text, field_limit)}",
+        f"Còn lại: {_bounded_text(remaining_text, field_limit)}",
+        f"Trạng thái: {_bounded_text(status, 40)}",
     ]
+    if budget is not None:
+        known = _bounded_text(str(budget["known_cost_usd"]), 18)
+        charge = _bounded_text(str(budget["budget_charge_usd"]), 18)
+        limit = _bounded_text(str(budget["cost_limit_usd"]), 18)
+        lines.extend([
+            f"Thời gian: {budget['active_seconds']:.1f}s; "
+            f"còn {budget['seconds_remaining']:.1f}s",
+            f"USD đã biết: {known}; ngân sách tính: {charge}/{limit}",
+            f"Attempts: {budget['physical_attempts']}; "
+            f"usage chưa biết: {budget['unknown_attempts']}",
+        ])
     card = "\n".join(lines)
     if len(card) > TASK_CARD_MAX_CHARS:
         raise ValueError("metadata cốt lõi của task card vượt giới hạn")
@@ -388,17 +436,25 @@ def extractive_summary(
             )
         )
     for row in tool_rows:
-        source = str(row.get("source") or row.get("tool_name") or "").strip()
+        sources = row.get("sources")
+        source_values = sources if isinstance(sources, list) else []
         payload = str(row.get("payload") or "").strip()
         tool_id = int(row["id"])
-        if source:
-            entries.append(
-                SummaryEntry(
-                    kind="source",
-                    text=_bounded_text(source, 250),
-                    source_tool_call_ids=[tool_id],
+        omitted_sources = 0
+        for source in source_values:
+            source_text = str(source).strip()
+            if len(source_text) > 250:
+                omitted_sources += 1
+                continue
+            if source_text:
+                entries.append(
+                    SummaryEntry(
+                        kind="source",
+                        text=source_text,
+                        source_tool_call_ids=[tool_id],
+                    )
                 )
-            )
+        document.omitted_count += omitted_sources
         if payload:
             entries.append(
                 SummaryEntry(

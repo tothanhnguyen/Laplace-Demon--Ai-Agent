@@ -1,8 +1,8 @@
-"""Mô hình ORM SQLAlchemy 2.0 cho lưu trữ và memory Sprint 3."""
+"""Mô hình ORM SQLAlchemy 2.0 cho lưu trữ, memory và reminder."""
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -26,6 +26,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="user")
+    reminders: Mapped[list["Reminder"]] = relationship(back_populates="user")
 
 
 class Conversation(Base):
@@ -90,13 +91,59 @@ class Step(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class ToolApproval(Base):
+    """Durable single-generation consent and atomic effect receipt."""
+
+    __tablename__ = "tool_approvals"
+    __table_args__ = (
+        Index(
+            "uq_tool_approvals_active_user",
+            "user_id",
+            unique=True,
+            sqlite_where=text("status IN ('pending', 'approved')"),
+        ),
+        Index(
+            "uq_tool_approvals_active_task",
+            "task_id",
+            unique=True,
+            sqlite_where=text("status IN ('pending', 'approved')"),
+        ),
+        Index("ix_tool_approvals_expiry", "status", "expires_at"),
+        Index("ix_tool_approvals_user_status", "user_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    step_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(32), nullable=False)
+    params_json: Mapped[str] = mapped_column(Text, nullable=False)
+    public_args_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    preview_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    decided_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    consumed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chat_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    preview_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class ToolCall(Base):
     """Log một lần gọi tool: tham số, kết quả JSON và độ trễ để soi lỗi."""
 
     __tablename__ = "tool_calls"
+    __table_args__ = (Index("uq_tool_calls_approval_id", "approval_id", unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    approval_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tool_approvals.id"), nullable=True
+    )
     tool_name: Mapped[str] = mapped_column(String(64))
     params_json: Mapped[str] = mapped_column(Text, default="{}")
     result_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -107,17 +154,27 @@ class ToolCall(Base):
 
 
 class LLMCall(Base):
-    """Log một lần gọi LLM kèm token/chi phí.
+    """Legacy estimates and durable physical-attempt accounting.
 
-    Cột `user_id` nullable được thêm ngoài contract gốc để `user_usage` tính
-    trực tiếp theo người dùng mà không phụ thuộc call có gắn task hay không.
+    Nullable attempt fields preserve historical rows; direct ownership survives
+    deletion of the request and task that originally incurred the usage.
     """
 
     __tablename__ = "llm_calls"
-
+    __table_args__ = (
+        Index("uq_llm_calls_group_attempt", "call_group_id", "attempt_index", unique=True),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    request_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id"), nullable=True
+    )
+    call_group_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    attempt_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    accounting_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    budget_charge_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    accounting_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     purpose: Mapped[str] = mapped_column(String(32))
     provider: Mapped[str] = mapped_column(String(32))
     model: Mapped[str] = mapped_column(String(64), default="")
@@ -141,3 +198,33 @@ class Trace(Base):
     step_index: Mapped[int] = mapped_column(Integer)
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Reminder(Base):
+    """Durable owner-scoped one-shot Telegram reminder."""
+
+    __tablename__ = "reminders"
+    __table_args__ = (
+        Index("ix_reminders_due", "status", "next_attempt_at_utc", "id"),
+        Index("ix_reminders_user_status_due", "user_id", "status", "due_at_utc"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False)
+    due_at_utc: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_attempt_at_utc: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    first_attempt_at_utc: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_attempt_at_utc: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sent_at_utc: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telegram_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="reminders")

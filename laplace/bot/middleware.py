@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import Message, TelegramObject
+from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from laplace.bot.ratelimit import TokenBucket
 
@@ -33,13 +33,17 @@ class IdentityRateLimitMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         """Bổ sung identity, kiểm tra quota rồi mới chuyển tiếp cho handler."""
-        if not isinstance(event, Message) or event.from_user is None:
+        if not isinstance(event, (Message, CallbackQuery)) or event.from_user is None:
             return None
 
         user_id = event.from_user.id
         data["telegram_user_id"] = user_id
         data["username"] = event.from_user.username
 
+        # Consent decisions must remain usable even when new-turn quota is exhausted.
+        # The handler validates owner, private origin, binding, expiry and CAS.
+        if isinstance(event, CallbackQuery):
+            return await handler(event, data)
         is_command = bool(event.text and event.text.startswith("/"))
         if not is_command and not self.bucket.allow(user_id):
             wait_s = int(self.bucket.retry_after(user_id))

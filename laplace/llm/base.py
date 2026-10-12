@@ -6,16 +6,64 @@ Schema, thường sinh từ ``Model.model_json_schema()``), provider cố gắng
 bằng Pydantic và yêu cầu mô hình tự sửa nếu sai.
 """
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
+
+
+class BudgetStop(RuntimeError):
+    """Terminal execution stop; never include request or provider error text."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__("Execution budget stopped.")
+
+
+class AttemptObserver(Protocol):
+    """Durably reserve before send and reconcile every physical attempt."""
+
+    def begin(
+        self,
+        *,
+        call_group_id: str,
+        attempt_index: int,
+        provider: str,
+        requested_model: str,
+        payload: dict[str, Any],
+        pricing: Mapping[str, tuple[float, float]],
+        pricing_version: str,
+    ) -> int: ...
+
+    def finish(
+        self,
+        attempt_id: int,
+        *,
+        returned_model: str | None,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        latency_ms: int,
+        outcome: str,
+    ) -> None: ...
+
+
+@dataclass(frozen=True)
+class CallOptions:
+    """Required limits and accounting callbacks for one logical LLM call."""
+
+    max_completion_tokens: int
+    attempt_timeout_seconds: float
+    remaining_seconds: Callable[[], float]
+    check: Callable[[], None]
+    observer: AttemptObserver
 
 
 @dataclass
 class LLMResult:
     """Kết quả chuẩn hóa mà mọi LLM provider trả về cho agent.
 
-    ``content`` là text thô, ``parsed`` là dict JSON khi có schema; token,
-    cost, latency và model phục vụ ghi bảng ``llm_calls`` (S2-06).
+    ``content`` là text thô, ``parsed`` là dict JSON khi có schema. Metrics
+    are reports only: the injected observer owns durable physical-attempt
+    accounting; ``attempt_ids`` identifies rows already written.
     """
 
     content: str | None = None
@@ -26,6 +74,8 @@ class LLMResult:
     latency_ms: int = 0
     model: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
+    attempt_ids: tuple[int, ...] = ()
+    usage_known: bool = True
 
 
 @runtime_checkable
@@ -42,12 +92,14 @@ class LLMProvider(Protocol):
         self,
         messages: list[dict[str, str]],
         *,
+        options: CallOptions,
         json_schema: dict[str, Any] | None = None,
     ) -> LLMResult:
         """Gọi LLM đồng bộ với messages dạng ``[{role, content}]``.
 
-        Implementer phải trả ``LLMResult`` và có thể cố gắng tạo ``parsed``
-        theo JSON schema; protocol không áp đặt SDK, retry hay validation.
+        Implementers must honor ``options`` and reserve/finish every physical
+        attempt through its observer. Schema validation remains the caller's
+        responsibility; a terminal budget stop must never become a free result.
         """
         ...
 
@@ -65,29 +117,34 @@ def resolve_provider_config(name: str) -> tuple[Any, str | None, str]:
     from laplace.config import Settings
     from laplace.llm.presets import PRESETS
 
+    if name not in PRESETS:
+        raise ValueError("Unknown LLM provider configuration.")
     preset = PRESETS[name]
     settings = Settings()
     api_key = getattr(settings, preset.settings_field, "") or None
     model = settings.llm_model or preset.default_model
+    if model not in preset.pricing:
+        raise ValueError("Unsupported LLM model configuration.")
     return preset, api_key, model
 
 
 def get_provider(name: str | None = None) -> LLMProvider:
     """Factory chọn provider theo preset registry (S2-05).
 
-    ``mock`` hoặc tên lạ trả ``MockLLM`` chạy offline; còn lại trả
-    ``OpenAIProvider`` với base_url/model/bảng giá từ preset. Thiếu key thì ném
-    ``MissingAPIKeyError`` kèm URL trang lấy key của đúng hãng, trước khi có
-    bất kỳ request mạng nào.
+    ``mock`` must be selected explicitly. Unknown provider/model/profile fails
+    before network access. Paid and known-zero presets carry exact prices and
+    an output-cap profile; missing credentials raise ``MissingAPIKeyError``.
     """
     from laplace.config import Settings
     from laplace.llm.presets import PRESETS, missing_key_message
 
     name = name or Settings().llm_provider
-    if name not in PRESETS:  # mock và mọi tên lạ -> MockLLM
+    if name == "mock":
         from laplace.llm.mock import MockLLM
 
         return MockLLM()
+    if name not in PRESETS:
+        raise ValueError("Unknown LLM provider configuration.")
 
     preset, api_key, model = resolve_provider_config(name)
     if not api_key:
@@ -101,4 +158,6 @@ def get_provider(name: str | None = None) -> LLMProvider:
         base_url=preset.base_url,
         name=name,
         pricing=preset.pricing,
+        output_cap_parameter=preset.output_cap_parameter,
+        pricing_version=preset.pricing_version,
     )

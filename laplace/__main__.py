@@ -1,14 +1,31 @@
 """Command-line entrypoint for ``python -m laplace``."""
 
 import argparse
+import logging
 
 from laplace.agent import Agent
 from laplace.config import Settings
+from laplace.logging import redact_text, setup_logging
 from laplace.tasks import successful_sample
 
 
 def main() -> None:
     """Chạy CLI mặc định hoặc trình diễn một nhiệm vụ Agent mẫu."""
+    # Install before importing bot/providers; include configured keys without
+    # ever displaying configuration or passing them to operational events.
+    setup_logging()
+    settings = Settings()
+    secrets = (
+        settings.gemini_api_key,
+        settings.openai_api_key,
+        settings.groq_api_key,
+        settings.bai_api_key,
+        settings.router9_api_key,
+        settings.telegram_bot_token,
+        settings.tavily_api_key,
+    )
+    level = logging.getLevelNamesMapping().get(settings.log_level.upper(), logging.INFO)
+    setup_logging(secrets=secrets, level=level)
     parser = argparse.ArgumentParser(description="Laplace's Demon command line interface")
     parser.add_argument(
         "--sample-agent",
@@ -41,9 +58,24 @@ def main() -> None:
 
         init_db()
         # CLI dùng identity dev cố định; identity thật đến từ Telegram.
-        reply = handle_message(0, "cli", arguments.chat, progress=print)
+        reply = handle_message(
+            0,
+            "cli",
+            arguments.chat,
+            progress=print,
+            transport="cli",
+            is_private_chat=True,
+        )
         print(reply.text)
-        print(f"usage={reply.usage}")
+        usage = reply.usage
+        print(
+            f"usage: logical_calls={usage['llm_calls']}, "
+            f"physical_attempts={usage['physical_attempts']}, "
+            f"known_tokens={usage['total_tokens']}, "
+            f"known_cost_usd={usage['known_cost_usd']:.6f}, "
+            f"budget_charge_usd={usage['budget_charge_usd']:.6f}, "
+            f"unknown_attempts={usage['unknown_attempts']}"
+        )
         return
 
     if arguments.sample_agent:
@@ -52,11 +84,11 @@ def main() -> None:
         print(f"completion_reason={result.completion_reason}")
         return
 
-    settings = Settings()
-    print(
+    print(redact_text(
         f"{settings.app_name} is ready "
-        f"(environment={settings.environment}, log_level={settings.log_level})."
-    )
+        f"(environment={settings.environment}, log_level={settings.log_level}).",
+        secrets=secrets,
+    ))
 
 
 if __name__ == "__main__":
