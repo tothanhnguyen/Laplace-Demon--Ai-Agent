@@ -1,0 +1,120 @@
+\documentclass[12pt,a4paper]{article}
+
+% Chọn XeLaTeX làm compiler trên Overleaf.
+\usepackage{fontspec}
+\setmainfont{TeX Gyre Termes}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{array}
+\usepackage{enumitem}
+
+\setlength{\parindent}{0pt}
+\setlist[itemize]{leftmargin=1.5em, itemsep=0.4em}
+
+\begin{document}
+
+\begin{center}
+    {\Large\textbf{BÁO CÁO TIẾN ĐỘ SPRINT 2}}\\[0.5em]
+    \textit{Thời gian thực hiện: 31/08/2026 -- 13/09/2026}
+\end{center}
+
+\vspace{1em}
+
+\begin{tabular}{@{}>{\bfseries}p{4cm}p{10cm}@{}}
+Nhóm:           & \rule{3cm}{0.4pt} \\[0.6em]
+Thành viên:     & Tô Thành Nguyên -- 24521207 \\[0.6em]
+Ngày báo cáo:   & 13/09/2026
+\end{tabular}
+
+\vspace{1.5em}
+
+\section*{1. Những nội dung đã làm trong 2 tuần qua}
+
+\subsection*{Tô Thành Nguyên -- 24521207}
+
+\begin{itemize}
+    \item Xây dựng Telegram Bot bằng aiogram 3.x với các lệnh \texttt{/start}, \texttt{/help}, \texttt{/status} và \texttt{/cancel}.
+
+    \item Kết nối handler tin nhắn Telegram với vòng lặp Agent và hỗ trợ tải tệp đính kèm về hệ thống.
+
+    \item Giới hạn kích thước tệp tải lên ở mức 10 MB và làm sạch tên tệp để hạn chế path traversal.
+
+    \item Gắn định danh Telegram với người dùng và hội thoại trong cơ sở dữ liệu.
+
+    \item Kiểm tra hai người dùng hoạt động song song không bị lẫn dữ liệu hội thoại.
+
+    \item Xử lý phản hồi dài hơn giới hạn của Telegram bằng cách chia nội dung theo ranh giới dòng hoặc khoảng trắng.
+
+    \item Hiển thị trạng thái ``Đang xử lý'', gửi typing action và cập nhật tiến độ từng bước trong một tin nhắn trạng thái.
+
+    \item Hỗ trợ yêu cầu hủy lượt đang chạy bằng lệnh \texttt{/cancel}.
+
+    \item Cài đặt token-bucket rate limit theo người dùng, mặc định 5 yêu cầu mỗi phút.
+
+    \item Kết nối các nhà cung cấp Gemini, OpenAI và Groq thông qua một adapter OpenAI-compatible.
+
+    \item Cho phép thay đổi nhà cung cấp và mô hình bằng biến môi trường, không cần sửa mã nguồn.
+
+    \item Xây dựng MockLLM để chạy kiểm thử offline và CI mà không cần API key thật.
+
+    \item Ghi nhận prompt tokens, completion tokens, chi phí ước tính và latency của từng lời gọi mô hình.
+
+    \item Tổng hợp mức sử dụng theo người dùng và hiển thị thông qua lệnh \texttt{/status}.
+
+    \item Xử lý lỗi HTTP 429 bằng cơ chế thử lại có giới hạn, tối đa 5 lần.
+
+    \item Xây dựng system prompt phiên bản đầu tiên và schema hành động \texttt{AgentAction}.
+
+    \item Kiểm tra output của mô hình và tham số công cụ bằng Pydantic trước khi thực thi.
+
+    \item Hoàn thiện phần lưu trữ còn thiếu từ Sprint 1 gồm 8 bảng SQLAlchemy/SQLite và trace JSON theo từng bước Agent.
+
+    \item Hoàn thành kiểm thử toàn tuyến bằng MockLLM và CLI smoke test.
+
+    \item Kết quả tại checkpoint cuối Sprint 2: Ruff đạt, 39 bài kiểm thử đạt; dữ liệu hội thoại, usage và trace được ghi đúng vào cơ sở dữ liệu.
+\end{itemize}
+
+\section*{2. Những nội dung sẽ làm trong 2 tuần tới}
+
+\subsection*{Tô Thành Nguyên -- 24521207}
+
+\begin{itemize}
+    \item Xây dựng context ba tầng gồm quy tắc ổn định, trạng thái nhiệm vụ và diễn biến hội thoại gần nhất.
+
+    \item Áp dụng ngân sách context trước mỗi lời gọi mô hình để lịch sử hoặc kết quả công cụ dài không làm vượt giới hạn.
+
+    \item Xây dựng thẻ trạng thái nhiệm vụ, thể hiện mục tiêu, tiêu chí hoàn thành, bước hiện tại, công cụ đã dùng và phần việc còn lại.
+
+    \item Lưu đầy đủ kết quả công cụ trong cơ sở dữ liệu nhưng chỉ đưa bản rút gọn vào context.
+
+    \item Thực hiện compaction theo watermark khi hội thoại kéo dài.
+
+    \item Giữ lại các quyết định, lý do, kết quả, nguồn và dữ kiện quan trọng khi tóm tắt lịch sử.
+
+    \item Hoàn thiện lệnh \texttt{/memory} để người dùng xem bộ nhớ phiên của mình.
+
+    \item Hoàn thiện lệnh \texttt{/forget} để xóa dữ liệu phiên có liên kết, đồng thời giữ nguyên dữ liệu usage.
+
+    \item Bảo đảm dữ liệu của người dùng khác không bị ảnh hưởng khi xem hoặc xóa bộ nhớ.
+
+    \item Cải thiện vòng đời hủy tác vụ và per-user lease để worker đang chạy không ghi dữ liệu trở lại sau khi bộ nhớ đã bị xóa.
+
+    \item Thực hiện thực nghiệm so sánh các chiến lược cấp context bằng cùng một bộ nhiệm vụ.
+
+    \item Chuẩn bị demo Telegram gồm hội thoại nhiều lượt, ghi nhớ dữ kiện, hiển thị task/tool, xem bộ nhớ và xóa bộ nhớ.
+\end{itemize}
+
+\section*{3. Những trở ngại}
+
+\begin{itemize}
+    \item Demo Telegram với mô hình thật và ba hội thoại mẫu chưa hoàn tất do cần Telegram Bot Token và API key của nhà cung cấp mô hình trong môi trường chạy riêng.
+
+    \item Context tại thời điểm kết thúc Sprint 2 mới sử dụng cửa sổ 10 tin nhắn gần nhất, chưa có compaction và bộ nhớ phiên đầy đủ.
+
+    \item Kết quả kiểm thử bằng MockLLM chứng minh luồng tích hợp nhưng chưa thay thế được bằng chứng chất lượng từ mô hình thật.
+
+    \item Công cụ chưa có timeout, phân loại rủi ro và Approval Gate; các nội dung này thuộc Sprint 4 và Sprint 5.
+
+    \item Cần bảo đảm API key, Telegram token, dữ liệu hội thoại thật và các tệp người dùng không xuất hiện trong repository hoặc báo cáo công khai.
+\end{itemize}
+
+\end{document}

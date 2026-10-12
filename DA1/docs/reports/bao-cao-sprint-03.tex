@@ -1,0 +1,100 @@
+\documentclass[12pt,a4paper]{article}
+
+% Biên dịch bằng XeLaTeX trên Overleaf.
+\usepackage{fontspec}
+\setmainfont{TeX Gyre Termes}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{enumitem}
+\usepackage{microtype}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.35em}
+\setlist[enumerate]{leftmargin=2em, itemsep=0.25em, topsep=0.35em}
+
+\begin{document}
+
+\textbf{Nhóm:} 1
+\hfill
+\textbf{Thành viên:} Tô Thành Nguyên
+\hfill
+\textbf{Ngày báo cáo:} 20/09/2026
+
+\vspace{1em}
+
+\textbf{Những nội dung đã làm trong 2 tuần qua:}
+
+\textbf{Sprint 3: Tổ chức context và bộ nhớ phiên (07/09 -- 20/09)}
+
+\begin{enumerate}
+    \item Xây dựng context ba tầng gồm quy tắc hệ thống, trạng thái phiên và lịch sử hội thoại gần nhất trước mỗi lần gọi mô hình.
+
+    \item Áp dụng ngân sách context mặc định 12.000 ký tự; hệ thống dừng trước khi gọi mô hình nếu phần nội dung bắt buộc vượt ngân sách.
+
+    \item Lưu đầy đủ kết quả công cụ trong SQLite nhưng chỉ đưa excerpt JSON tối đa 1.200 ký tự cùng \texttt{tool\_call\_id} vào context.
+
+    \item Xây dựng task card thể hiện mục tiêu, tiêu chí hoàn thành, bước hiện tại, công cụ đã dùng, kết quả và phần việc còn lại.
+
+    \item Gắn Task, Step, ToolCall và Trace với đúng người dùng và request; chỉ tạo task khi agent thực sự gọi tool.
+
+    \item Bổ sung reservation theo người dùng, cooperative cancellation qua \texttt{/cancel} và checkpoint trước mỗi lần gọi mô hình hoặc công cụ.
+
+    \item Hoàn thiện migration Sprint 3, bật foreign key cho SQLite và cập nhật summary cùng watermark bằng compare-and-update nguyên tử.
+
+    \item Xây dựng compaction theo page hữu hạn, giữ tối đa bốn exchange gần nhất và dùng extractive fallback khi mô hình tóm tắt lỗi.
+
+    \item Hoàn thiện \texttt{/memory}, \texttt{/forget} và \texttt{/forget confirm}; memory được xóa theo ownership nhưng user và lịch sử usage vẫn được giữ.
+
+    \item Xây dựng bộ đánh giá gồm tám tình huống trên ba chiến lược \texttt{full}, \texttt{window10} và \texttt{sprint3}; offline evaluation hoàn tất 48/48 lượt.
+
+    \item Live evaluation schema v2 hoàn tất 24/24 lượt: \texttt{full} đạt 8/8 với 255.950 tokens, \texttt{window10} đạt 4/8 với 138.819 tokens và \texttt{sprint3} đạt 7/8 với 175.878 tokens.
+
+    \item Chiến lược Sprint 3 giảm 80.072 tokens, tương đương 31,3\% so với \texttt{full}, và không có unsupported claim trong bộ đánh giá live.
+
+    \item Kết quả kiểm tra cuối: Ruff đạt, 77 bài kiểm thử pytest đạt, offline artifact và live artifact đều có \texttt{incomplete=false}.
+
+    \item Hoàn thành demo Telegram thật: nhớ dữ kiện sau hội thoại dài, gọi tool, hiển thị task card và memory, xóa phiên có xác nhận, đồng thời giữ số liệu usage.
+\end{enumerate}
+
+\textbf{Những nội dung sẽ làm trong 2 tuần tới:}
+
+\textbf{Sprint 4: Core Toolset qua Telegram (21/09 -- 04/10)}
+
+\begin{enumerate}
+    \item Mở rộng Tool Registry với purpose, hướng dẫn sử dụng, risk level, input schema và output schema.
+
+    \item Thêm \texttt{ToolContext} chứa identity và ownership đáng tin cậy; chuẩn hóa \texttt{ToolResult} và validate cả input lẫn output bằng Pydantic.
+
+    \item Loại \texttt{read\_file} path-based khỏi production registry; tài liệu chỉ được truy cập qua attachment capability không để model tự truyền đường dẫn.
+
+    \item Tích hợp Tavily Search và Extract để tìm kiếm web, lấy nguồn thật và trả citation/URL có trong tool result.
+
+    \item Bổ sung xử lý lỗi thiếu API key, timeout, upstream reject, sai tham số và dữ liệu đầu ra không hợp lệ; không tạo kết quả giả.
+
+    \item Xử lý PDF, DOCX và UTF-8 TXT tối đa 10 MiB qua Telegram; trích xuất theo page, section hoặc paragraph có locator.
+
+    \item Từ chối trung thực PDF scan không có text, file hỏng, file quá lớn hoặc định dạng không hỗ trợ; chưa triển khai OCR trong Sprint 4.
+
+    \item Xây dựng reminder theo user với các thao tác tạo, cập nhật và hủy; lưu dữ liệu UTC bền vững trong SQLite.
+
+    \item Dùng APScheduler để phục hồi reminder sau khi bot restart, retry delivery có giới hạn và ghi trạng thái gửi rõ ràng.
+
+    \item Kiểm thử toàn tuyến qua Telegram: tìm web, đọc nguồn hoặc tài liệu, tạo reminder, restart bot và nhận thông báo đúng user.
+
+    \item Chạy toàn bộ pytest và Ruff sau integration; cập nhật README, \texttt{.env.example}, hướng dẫn vận hành và báo cáo Sprint 4.
+\end{enumerate}
+
+\textbf{Những trở ngại:}
+
+\begin{enumerate}
+    \item Strategy \texttt{sprint3} chưa đạt E-05 vì fact nằm giữa tool payload và không xuất hiện trong bounded head/tail excerpt.
+
+    \item Live evaluation hiện chỉ có tám tình huống và một lần lặp nên kết quả mang tính thăm dò, chưa chứng minh tối ưu phổ quát.
+
+    \item Web research phụ thuộc Tavily API key, quota và độ ổn định của dịch vụ bên ngoài.
+
+    \item Parser tài liệu phải kiểm soát file nén, dung lượng mở rộng, thời gian chạy và bộ nhớ để tránh file xấu làm treo worker.
+
+    \item Telegram không cung cấp idempotency cho việc gửi reminder; Sprint 4 dùng at-least-once delivery nên vẫn phải công khai rủi ro gửi trùng khi tiến trình crash đúng thời điểm.
+\end{enumerate}
+
+\end{document}
