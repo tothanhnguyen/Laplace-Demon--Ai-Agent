@@ -73,6 +73,9 @@ class Task(Base):
     )
     goal: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(24), default="pending")
+    # Sprint 6: evidence verification axis, independent of lifecycle status.
+    verification_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    verification_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

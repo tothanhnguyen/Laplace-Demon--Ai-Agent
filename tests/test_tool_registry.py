@@ -182,6 +182,7 @@ def test_executor_uses_trusted_context_and_returns_canonical_sources(
 
     assert result.model_dump(mode="json") == {
         "ok": True,
+        "attempts": 1,
         "data": {"answer": "fact"},
         "error": None,
         "error_code": None,
@@ -580,3 +581,20 @@ def test_validation_failures_never_echo_keys_or_custom_validator_context(
         assert result.retryable is False
         assert canary not in result.model_dump_json()
         assert "alice@example.test" not in result.model_dump_json()
+
+
+def test_llm_spec_strips_schema_titles_but_keeps_a_property_named_title() -> None:
+    class _TitledArgs(ToolModel):
+        title: str
+        query: str
+
+    @tool(name="titled", purpose="p", when_to_use="w", when_not_to_use="n",
+          risk_level=RiskLevel.READ, args_model=_TitledArgs, result_model=_Output)
+    def titled(args, context):
+        return _Output(answer=args.title)
+
+    spec = base.get_tool("titled").llm_spec()
+    assert "title" not in spec["input_schema"]
+    assert set(spec["input_schema"]["properties"]) == {"title", "query"}
+    assert spec["input_schema"]["required"] == ["title", "query"]
+    assert "title" not in spec["input_schema"]["properties"]["query"]

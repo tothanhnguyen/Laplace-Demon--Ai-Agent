@@ -859,3 +859,40 @@ def test_budget_session_rejects_nonfinite_or_negative_timeout(db: None, timeout)
         timeout_seconds=timeout
     ):
         pytest.fail("invalid timeout entered a transaction")
+
+
+def test_sprint6_verification_columns_are_added_once_and_legacy_rows_stay_null(tmp_path) -> None:
+    database = tmp_path / "sprint6.db"
+    reset_engine_for_tests(f"sqlite:///{database}")
+    init_db()
+    with session_scope() as session:
+        user = get_or_create_user(session, 9006, "legacy")
+        conversation = get_or_create_conversation(session, user)
+        request = add_message(session, conversation, "user", "old goal")
+        task = repo.create_task(
+            session, user_id=user.id, conversation_id=conversation.id,
+            request_message_id=request.id, goal="old goal",
+        )
+        task_id = task.id
+    reset_engine_for_tests(None)
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        "ALTER TABLE tasks DROP COLUMN verification_status;"
+        "ALTER TABLE tasks DROP COLUMN verification_json;"
+    )
+    connection.close()
+
+    reset_engine_for_tests(f"sqlite:///{database}")
+    init_db()
+    init_db()
+    columns = {column["name"] for column in inspect(get_engine()).get_columns("tasks")}
+    assert {"verification_status", "verification_json"} <= columns
+    with session_scope() as session:
+        task = session.get(Task, task_id)
+        assert task.verification_status is None and task.verification_json is None
+        assert repo.task_snapshot(session, task_id)["verification_status"] is None
+        repo.save_verification(session, task_id, status="verified", detail_json="{}")
+    with session_scope() as session:
+        assert session.get(Task, task_id).verification_status == "verified"
+        assert session.get(Task, task_id).status == "running"
+    reset_engine_for_tests(None)

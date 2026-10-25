@@ -19,13 +19,17 @@ SAFE_STOP_REASONS = frozenset({
     "context_overflow", "execution_error", "effect_incomplete", "cancelled", "step_limit",
     "time_limit", "cost_limit", "budget_unavailable", "repeated_error", "awaiting_approval",
     "approval_invalid", "approval_invalidated", "approval_failed", "approval_cancelled",
-    "required_context_too_large",
+    "required_context_too_large", "param_error", "permission_required", "service_error",
+    "restart_interrupted",
 })
-SAFE_EVENTS = SAFE_STOP_REASONS | {"tool_call", "compaction_backlog", "unknown_event"}
+SAFE_EVENTS = SAFE_STOP_REASONS | {
+    "tool_call", "compaction_backlog", "unknown_event", "verification", "restart_notice",
+}
 SAFE_STATUSES = frozenset({
     "pending", "running", "awaiting_approval", "approved", "rejected", "expired", "executing",
     "completed", "failed", "cancelled", "invalidated", "interrupted", "sent", "delivery_unknown",
     "missed", "step_limit", "time_limit", "cost_limit", "settled", "unknown", "reserved",
+    "verified", "partial", "unverified", "not_applicable",
 })
 _EXCEPTION_CODES = frozenset({
     "RuntimeError", "ValueError", "TypeError", "KeyError", "LookupError", "AssertionError",
@@ -58,13 +62,15 @@ _ENUM_FIELDS = {
     "pricing_mode": frozenset({"known", "unknown", "configured", "free", "paid", "reserved"}),
     "pricing_status": frozenset({"known", "unknown", "reserved", "settled", "unavailable"}),
     "accounting_status": frozenset({"reserved", "settled", "unknown"}),
+    "error_class": frozenset({"transient", "param", "permission", "service"}),
+    "decision": frozenset({"continue", "correct_once", "stop"}),
 }
 _ID_FIELDS = frozenset({"task_id", "approval_id", "tool_call_id"})
 _COUNTER_FIELDS = frozenset({
     "step_index", "remaining_chars", "sources_omitted", "max_steps", "steps_used",
     "steps_remaining", "processed_steps", "total_steps", "llm_calls", "logical_calls",
     "physical_attempts", "unknown_attempts", "prompt_tokens", "completion_tokens",
-    "total_tokens", "attempt_index", "attempt_count",
+    "total_tokens", "attempt_index", "attempt_count", "attempts", "checks", "passed",
 })
 _METRIC_FIELDS = frozenset({
     "latency_ms", "active_seconds", "seconds_remaining", "cost_usd", "cost_limit_usd",

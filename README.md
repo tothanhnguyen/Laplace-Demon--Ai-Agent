@@ -235,6 +235,52 @@ Run cuối `20260916T145221Z` hoàn tất 24/24 case-strategy,
 `incomplete=false`: full 8/8, window10 4/8, sprint3 7/8. Hai artifact giữ
 trong repo là offline `20260912T105242Z` và live `20260916T145221Z`.
 
+## Kiểm chứng kết quả và phục hồi lỗi (Sprint 6)
+
+Mọi lượt có task (dùng tool) trả lời theo một khuôn cố định, dựng bởi runtime
+chứ không phải lời tự khai của mô hình:
+
+```
+Kết quả
+<câu trả lời hoặc lý do dừng>
+
+Căn cứ đã kiểm tra — Đã kiểm chứng | Kiểm chứng một phần | Chưa kiểm chứng | Không áp dụng
+- Đạt: Reminder #12 có trong hệ thống (pending, 2026-10-25T01:00:00Z)
+- Đạt: "trích dẫn nguyên văn" có trong nguồn [1]
+
+Nguồn
+[1] https://…
+
+Giới hạn
+- <giới hạn do mô hình nêu + lỗi tool, dừng sớm, trích dẫn không khớp>
+
+Hành động còn chờ duyệt
+- Không có | Tool: create_reminder; Operation: create (hết hạn sau 15 phút)
+```
+
+Verifier chỉ đọc dữ liệu đã lưu: reminder đọc lại theo ID và owner; mỗi tool đã
+dùng phải có ít nhất một lần `ok`; trích dẫn (`claims`) mô hình đề nghị phải là
+chuỗi con của nội dung nguồn đã lưu; URL trong câu trả lời phải thuộc nguồn đã
+đọc. Kết quả lưu ở `tasks.verification_status` và hiện trên task card dòng
+`Kiểm chứng`. Verifier không chứng minh suy luận ngữ nghĩa, chỉ chứng minh
+nguồn chứa trích dẫn.
+
+Lỗi tool được phân lớp tại gateway và xử lý theo chiến lược cố định:
+
+| Lớp | `error_code` | Chiến lược |
+|---|---|---|
+| transient | `timeout`, `upstream_error` retryable | READ/DRAFT retry tối đa 2 lần (backoff 0.5s, 1s, không vượt thời gian còn lại); tool ghi dữ liệu không bao giờ retry |
+| param | `invalid_input`, `not_found` | mô hình được sửa tham số đúng một lần; lần hai dừng `param_error` |
+| permission | `forbidden` | dừng ngay với hướng dẫn cố định, không gọi thêm mô hình |
+| service | còn lại, hoặc transient đã hết retry | dừng tool; một lượt final-only để mô hình giải thích bằng kết quả đã có |
+
+Khi bot khởi động lại, task đang dở (`pending/running/awaiting_approval`) được
+đánh dấu `interrupted`; receipt đã commit được đối chiếu lại với DB và owner
+nhận đúng một thông báo theo khuôn trên. Hệ thống **không tự chạy lại** task;
+đề xuất chưa duyệt bị vô hiệu như Sprint 5; người dùng gửi lại yêu cầu nếu cần.
+Báo cáo phân loại lỗi và ma trận fault injection nằm trong tài liệu nội bộ của
+đồ án.
+
 ## Kiểm tra chất lượng
 
 ```bash

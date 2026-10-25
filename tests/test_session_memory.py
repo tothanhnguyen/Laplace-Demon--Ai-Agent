@@ -54,6 +54,13 @@ def _isolated_database(monkeypatch) -> None:
     reset_engine_for_tests(None)
 
 
+def _result(text: str) -> str:
+    """Core result section of a five-part task reply; plain chat text is unchanged."""
+    if not text.startswith("Kết quả\n"):
+        return text
+    return text[len("Kết quả\n"):].split("\n\nCăn cứ đã kiểm tra — ", 1)[0]
+
+
 def test_sprint2_schema_migration_is_additive_and_idempotent(tmp_path: Path) -> None:
     database = tmp_path / "legacy.db"
     with sqlite3.connect(database) as connection:
@@ -679,7 +686,7 @@ def test_compaction_recalls_early_fact_once_and_respects_every_call_budget(
     for request in requests:
         assert len(request) == long_message_chars
         reply = _run_context_turn(user_id, request, provider)
-        assert reply.text == "ok"
+        assert _result(reply.text) == "ok"
         watermarks.append(_latest_summary(user_id)[1])
 
     assert watermarks == [None] * seed_count
@@ -689,7 +696,7 @@ def test_compaction_recalls_early_fact_once_and_respects_every_call_budget(
     persisted_summary, compacted_watermark = _latest_summary(user_id)
     watermarks.append(compacted_watermark)
 
-    assert recalled.text == "recalled"
+    assert _result(recalled.text) == "recalled"
     assert persisted_summary is not None
     assert compacted_watermark is not None
     summary_document = parse_summary(persisted_summary)
@@ -780,7 +787,7 @@ def test_two_page_compaction_backlog_is_explicit_in_context(monkeypatch) -> None
         if message["content"].startswith("SESSION_STATE_DATA")
     ]
 
-    assert reply.text == "ok"
+    assert _result(reply.text) == "ok"
     assert len(state_messages) == 1
     assert "UNSUMMARIZED_HISTORY_BACKLOG" in state_messages[0]["content"]
 

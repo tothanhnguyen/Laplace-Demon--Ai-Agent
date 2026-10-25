@@ -486,7 +486,7 @@ async def _deliver_reply(message: Message, editor: _StatusEditor, reply, detache
     chunks = split_message(reply.text) or ["(Không có nội dung trả lời.)"]
     await editor.edit(chunks[0])
     for chunk in chunks[1:]:
-        await message.answer(chunk)
+        await message.answer(chunk, parse_mode=None)
 
 
 def _release_unstarted_worker(lease: TurnLease, approval_token: str | None) -> None:

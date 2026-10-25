@@ -342,8 +342,9 @@ def test_i06_compacted_external_content_stays_data_and_cannot_mint_next_turn_rig
                    for entry in summary.entries)
         assert session.scalar(select(Message.content).where(Message.id == source_id)) == PAYLOAD
     calls = stored_calls()
-    assert calls[-2][1]["error_code"] == "forbidden"
-    assert calls[-1][1]["error_code"] == "not_found"
+    # The forbidden proposal stops the turn (permission class); nothing runs after it.
+    assert calls[-1][1]["error_code"] == "forbidden"
+    assert [name for name, _ in calls] == ["read_document", "create_reminder"]
     state = next(message for message in model.calls[0]["messages"]
                  if message["content"].startswith("SESSION_STATE_DATA"))
     assert state["role"] == "user"
