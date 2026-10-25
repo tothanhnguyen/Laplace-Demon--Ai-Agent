@@ -11,6 +11,12 @@ from pydantic import BaseModel, Field
 TOOL_OBSERVATION_MAX_CHARS = 1_200
 DOCUMENT_TOOL_OBSERVATION_MAX_CHARS = 6_000
 TASK_CARD_MAX_CHARS = 1_000
+VERIFICATION_LABELS = {
+    "verified": "Đã kiểm chứng",
+    "partial": "Kiểm chứng một phần",
+    "unverified": "Chưa kiểm chứng",
+    "not_applicable": "Không áp dụng",
+}
 SUMMARY_MAX_CHARS = 2_000
 INVALID_REPLY_MAX_CHARS = 1_000
 RETRY_ERROR_CODES = frozenset(
@@ -297,6 +303,9 @@ def render_task_card(snapshot: dict[str, Any], *, budget: dict[str, Any] | None 
         f"Còn lại: {_bounded_text(remaining_text, field_limit)}",
         f"Trạng thái: {_bounded_text(status, 40)}",
     ]
+    verification = snapshot.get("verification_status")
+    if isinstance(verification, str) and verification in VERIFICATION_LABELS:
+        lines.append(f"Kiểm chứng: {VERIFICATION_LABELS[verification]}")
     if budget is not None:
         known = _bounded_text(str(budget["known_cost_usd"]), 18)
         charge = _bounded_text(str(budget["budget_charge_usd"]), 18)

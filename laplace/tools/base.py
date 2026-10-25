@@ -18,6 +18,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from laplace.llm.base import BudgetStop
 from laplace.services.budget import TurnBudget
+from laplace.tools.errors import (
+    MAX_TRANSIENT_RETRIES,
+    ErrorClass,
+    classify,
+    is_transient_exception,
+    run_with_transient_retry,
+)
 
 
 class RiskLevel(StrEnum):
@@ -156,6 +163,8 @@ class ToolResult(ToolModel):
     retryable: bool = False
     sources: list[str] = Field(default_factory=list, max_length=MAX_SOURCES)
     latency_ms: int = Field(ge=0)
+    # Physical run attempts inside the gateway (transient retry); legacy rows default to 1.
+    attempts: int = Field(default=1, ge=1, le=1 + MAX_TRANSIENT_RETRIES)
 
     @model_validator(mode="after")
     def _consistent_envelope(self) -> ToolResult:
@@ -208,9 +217,26 @@ class ToolSpec:
             "when_to_use": self.when_to_use,
             "when_not_to_use": self.when_not_to_use,
             "risk_level": self.risk_level.value,
-            "input_schema": self.args_model.model_json_schema(),
-            "output_schema": self.result_model.model_json_schema(),
+            "input_schema": _without_titles(self.args_model.model_json_schema()),
+            "output_schema": _without_titles(self.result_model.model_json_schema()),
         }
+
+
+def _without_titles(schema: Any) -> Any:
+    """Drop pydantic's decorative ``title`` keys; names under properties/$defs are kept."""
+    if isinstance(schema, dict):
+        cleaned: dict[str, Any] = {}
+        for key, value in schema.items():
+            if key == "title":
+                continue
+            if key in {"properties", "$defs"} and isinstance(value, dict):
+                cleaned[key] = {name: _without_titles(item) for name, item in value.items()}
+            else:
+                cleaned[key] = _without_titles(value)
+        return cleaned
+    if isinstance(schema, list):
+        return [_without_titles(item) for item in schema]
+    return schema
 
 
 _REGISTRY: dict[str, ToolSpec] = {}
@@ -328,6 +354,8 @@ def execute(
     def elapsed_ms() -> int:
         return max(0, int((monotonic() - started) * 1000))
 
+    attempts = 1
+
     def failure(
         error_code: ErrorCode,
         error: str,
@@ -346,7 +374,13 @@ def execute(
             retryable=retryable,
             sources=normalized_sources,
             latency_ms=elapsed_ms(),
+            attempts=attempts,
         )
+
+    def transient(exc: BaseException) -> bool:
+        if isinstance(exc, ToolFailure):
+            return classify(exc.error_code, retryable=exc.retryable) is ErrorClass.TRANSIENT
+        return is_transient_exception(exc)
 
     spec = get_tool(name)
     if spec is None:
@@ -405,7 +439,15 @@ def execute(
                     task_id=context.task_id,
                     step_index=context.step_index,
                 )
-        raw = spec.run(parsed, context)
+        if requires_approval:
+            # Writes run exactly once: a retry could duplicate a committed effect.
+            raw = spec.run(parsed, context)
+        else:
+            raw, attempts = run_with_transient_retry(
+                lambda: spec.run(parsed, context),
+                is_transient_failure=transient,
+                budget=context.budget,
+            )
         context.budget.check()
         if requires_approval:
             if not isinstance(raw, ToolResult) or not raw.ok:
@@ -419,10 +461,12 @@ def execute(
             data=validated.model_dump(mode="json"),
             sources=_normalize_sources(payload.sources),
             latency_ms=elapsed_ms(),
+            attempts=attempts,
         )
     except BudgetStop:
         raise
     except ToolFailure as exc:
+        attempts = getattr(exc, "attempts", attempts)
         return failure(
             exc.error_code,
             exc.message,
@@ -431,5 +475,10 @@ def execute(
         )
     except ValidationError:
         return failure("runtime_error", "Tool returned data that violates its output schema.")
+    except (TimeoutError, ConnectionError) as exc:
+        attempts = getattr(exc, "attempts", attempts)
+        return failure(
+            "timeout", f"Tool '{name}' timed out or lost its connection.", retryable=True
+        )
     except Exception:
         return failure("runtime_error", f"Tool '{name}' failed during execution.")

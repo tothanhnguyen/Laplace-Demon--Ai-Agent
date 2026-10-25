@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -566,6 +567,7 @@ def task_snapshot(session: Session, task_id: int) -> dict[str, Any]:
         "id": task.id,
         "goal": task.goal,
         "status": task.status,
+        "verification_status": task.verification_status,
         "decision_index": steps[-1].step_index if steps else 0,
         "tool_count": tool_count,
         "tools": [
@@ -575,6 +577,102 @@ def task_snapshot(session: Session, task_id: int) -> dict[str, Any]:
         "criteria": criteria,
         "remaining": remaining,
     }
+
+
+ACTIVE_TASK_STATUSES = ("pending", "running", "awaiting_approval")
+
+
+def active_task_snapshots(session: Session, *, limit: int = 1_000) -> list[dict[str, Any]]:
+    """Tasks a crashed process left unfinished, oldest first; read before interrupting."""
+    rows = session.execute(
+        select(Task.id, Task.user_id, User.telegram_user_id, Task.conversation_id, Task.goal,
+               Task.status)
+        .join(User, User.id == Task.user_id)
+        .where(Task.status.in_(ACTIVE_TASK_STATUSES))
+        .order_by(Task.id)
+        .limit(limit)
+    ).all()
+    return [
+        {
+            "id": task_id, "user_id": user_id, "telegram_user_id": telegram_user_id,
+            "conversation_id": conversation_id, "goal": goal, "status": status,
+        }
+        for task_id, user_id, telegram_user_id, conversation_id, goal, status in rows
+    ]
+
+
+def interrupt_active_tasks(session: Session, task_ids: Sequence[int]) -> int:
+    """CAS every listed task that is still active to ``interrupted``; returns the count."""
+    if not task_ids:
+        return 0
+    changed = session.execute(
+        update(Task)
+        .where(Task.id.in_(list(task_ids)), Task.status.in_(ACTIVE_TASK_STATUSES))
+        .values(status="interrupted", updated_at=utcnow())
+    )
+    return int(changed.rowcount or 0)
+
+
+def task_receipts(session: Session, task_id: int) -> list[tuple[str, dict[str, Any]]]:
+    """Committed (executed) approval receipts of a task as ``(tool_name, data)`` pairs."""
+    rows = session.scalars(
+        select(ToolApproval)
+        .where(ToolApproval.task_id == task_id, ToolApproval.status == "executed")
+        .order_by(ToolApproval.id)
+    ).all()
+    receipts: list[tuple[str, dict[str, Any]]] = []
+    for row in rows:
+        try:
+            envelope = json.loads(row.result_json or "")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        data = envelope.get("data") if isinstance(envelope, dict) else None
+        if isinstance(data, dict):
+            receipts.append((row.tool_name, data))
+    return receipts
+
+
+def next_step_index(session: Session, task_id: int) -> int:
+    current = session.scalar(select(func.max(Step.step_index)).where(Step.task_id == task_id))
+    return 0 if current is None else int(current) + 1
+
+
+def task_tool_results(session: Session, task_id: int) -> list[dict[str, Any]]:
+    """Parsed canonical tool envelopes of one task, oldest first, for verification."""
+    rows = session.scalars(
+        select(ToolCall).where(ToolCall.task_id == task_id).order_by(ToolCall.id)
+    ).all()
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            envelope = json.loads(row.result_json)
+        except (TypeError, json.JSONDecodeError):
+            envelope = {}
+        if not isinstance(envelope, dict):
+            envelope = {}
+        sources = envelope.get("sources")
+        results.append(
+            {
+                "tool_call_id": row.id,
+                "tool_name": row.tool_name,
+                "ok": bool(row.ok),
+                "error_code": envelope.get("error_code"),
+                "sources": [str(item) for item in sources] if isinstance(sources, list) else [],
+                "data": envelope.get("data"),
+            }
+        )
+    return results
+
+
+def save_verification(
+    session: Session, task_id: int, *, status: str, detail_json: str
+) -> None:
+    """Persist the evidence verdict on its task; the task status axis is untouched."""
+    session.execute(
+        update(Task)
+        .where(Task.id == task_id)
+        .values(verification_status=status, verification_json=detail_json)
+    )
 
 
 def tool_rows_for_request_ids(

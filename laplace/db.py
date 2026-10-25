@@ -108,12 +108,28 @@ def _migrate_sprint5(engine: Engine) -> None:
         )
 
 
+def _migrate_sprint6(engine: Engine) -> None:
+    """Add nullable task verification columns; legacy rows stay NULL."""
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.begin() as connection:
+        existing = {item["name"] for item in inspect(connection).get_columns("tasks")}
+        additions = {
+            "verification_status": "VARCHAR(16)",
+            "verification_json": "TEXT",
+        }
+        for name, sql_type in additions.items():
+            if name not in existing:
+                connection.execute(text(f"ALTER TABLE tasks ADD COLUMN {name} {sql_type}"))
+
+
 def init_db() -> None:
     """Tạo schema mới và nâng cấp additive DB Sprint 2."""
     engine = get_engine()
     Base.metadata.create_all(engine)
     _migrate_sprint3(engine)
     _migrate_sprint5(engine)
+    _migrate_sprint6(engine)
     from laplace.repo import interrupt_reserved_llm_calls
 
     with session_scope() as session:

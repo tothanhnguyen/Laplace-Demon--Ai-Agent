@@ -34,7 +34,14 @@ from laplace.db import session_scope
 from laplace.llm.base import BudgetStop, CallOptions, LLMProvider, get_provider
 from laplace.models import Conversation
 from laplace.prompts import AgentAction, system_message
-from laplace.services import approvals
+from laplace.services import approvals, error_policy, verifier
+from laplace.services.answer_format import (
+    PendingAction,
+    event_limitation,
+    render_task_reply,
+    stop_text,
+    stored_task_message,
+)
 from laplace.services.budget import AttemptRecorder, TurnBudget
 from laplace.services.memory import (
     AttachmentBundle,
@@ -57,6 +64,7 @@ from laplace.tools.base import (
     load_builtin_tools,
     public_args_hash,
 )
+from laplace.tools.errors import classify_result
 
 MAX_SCHEMA_RETRIES = 2
 MAX_REQUIRED_EFFECT_CORRECTIONS = 2
@@ -482,11 +490,12 @@ def _next_action(
     observer: ContextObserver | None,
     strategy: ContextStrategy,
     final_only: bool = False,
+    schema_retries: int = MAX_SCHEMA_RETRIES,
 ) -> tuple[AgentAction | None, str | None]:
     """Validate action; mỗi retry dựng context mới và vẫn chịu budget."""
     schema = AgentAction.model_json_schema()
     retries: list[MessageGroup] = []
-    for attempt in range(MAX_SCHEMA_RETRIES + 1):
+    for attempt in range(schema_retries + 1):
         built = build_messages(retries)
         if attempt == 0:
             purpose = "agent_final" if final_only else "agent_action"
@@ -519,7 +528,7 @@ def _next_action(
                 error = "invalid_action_schema"
         else:
             error = "invalid_json_object"
-        if attempt == MAX_SCHEMA_RETRIES:
+        if attempt == schema_retries:
             return None, "schema_failure"
         retries.append(retry_group(result.content, error))
     return None, "schema_failure"
@@ -533,24 +542,73 @@ def _task_state(action: AgentAction | None) -> dict[str, Any]:
     }
 
 
+def _receipts_for_verifier(state: TurnState) -> list[verifier.Receipt]:
+    return [
+        verifier.Receipt(tool_name, receipt.result.data)
+        for (tool_name, _), receipt in state.receipts.items()
+        if isinstance(receipt.result.data, dict)
+    ]
+
+
+def _verification(
+    state: TurnState, action: AgentAction | None, answer_text: str
+) -> verifier.VerificationReport | None:
+    """Evidence report for the task of this turn; None when no task exists yet."""
+    if state.task_id is None:
+        return None
+    claims = (
+        [verifier.Claim(item.source, item.quote) for item in action.claims or []]
+        if action is not None and action.action == "final"
+        else []
+    )
+    return verifier.verify_task(
+        task_id=state.task_id,
+        user_id=state.user_id,
+        receipts=_receipts_for_verifier(state),
+        claims=claims,
+        answer_text=answer_text,
+        # Read-only check; keep a small floor so an exhausted time budget cannot
+        # turn a real receipt into a false "unverified" on a transient lock.
+        timeout_seconds=max(1.0, state.budget.remaining_seconds()),
+    )
+
+
 def _persist_terminal(
+    state: TurnState,
     *,
-    conversation_id: int,
-    task_id: int | None,
     step_index: int,
     event: str,
     task_status: str,
     reply_text: str,
     action: AgentAction | None,
-    budget: TurnBudget,
-) -> str | None:
-    """Persist terminal turn state and its live budget in one short transaction."""
+) -> tuple[str, str | None]:
+    """Verify evidence, render the five-part reply and persist terminal state once.
+
+    ``reply_text`` is the core result (final answer or stop text); the returned
+    text is what the user and the message log receive. Chat without a task keeps
+    the conversational text unchanged.
+    """
+    budget = state.budget
+    is_final = action is not None and action.action == "final"
+    report = _verification(state, action, reply_text if is_final else "")
+    limitations = list(action.limitations or []) if action is not None else []
+    runtime_limit = event_limitation(event)
+    if runtime_limit is not None:
+        limitations.append(runtime_limit)
+    rendered = (
+        render_task_reply(result=reply_text, report=report, limitations=limitations)
+        if state.task_id is not None
+        else reply_text
+    )
+    # The message log keeps the core result plus committed-effect facts so later
+    # context/compaction is not filled with template boilerplate.
+    stored = stored_task_message(reply_text, report)
     card: str | None = None
     with session_scope(timeout_seconds=budget.remaining_seconds()) as session:
-        if task_id is not None:
+        if state.task_id is not None:
             repo.append_step(
                 session,
-                task_id=task_id,
+                task_id=state.task_id,
                 step_index=step_index,
                 name=event,
                 status=task_status,
@@ -561,25 +619,119 @@ def _persist_terminal(
                     "stop_reason": event,
                 },
             )
-            repo.close_task(session, task_id, task_status)
+            repo.close_task(session, state.task_id, task_status)
+            if report is not None:
+                repo.save_verification(
+                    session, state.task_id, status=report.status, detail_json=report.to_json()
+                )
+                repo.record_trace(
+                    session,
+                    task_id=state.task_id,
+                    conversation_id=state.conversation_id,
+                    step_index=step_index,
+                    payload={
+                        "event": "verification",
+                        "status": report.status,
+                        "checks": len(report.checks),
+                        "passed": sum(1 for check in report.checks if check.ok),
+                    },
+                )
         repo.record_trace(
             session,
-            task_id=task_id,
-            conversation_id=conversation_id,
+            task_id=state.task_id,
+            conversation_id=state.conversation_id,
             step_index=step_index,
             payload={"event": event, "status": task_status},
         )
-        conversation = session.get(Conversation, conversation_id)
+        conversation = session.get(Conversation, state.conversation_id)
         if conversation is None:
             raise LookupError("Conversation đã biến mất trong lượt chat")
-        repo.add_message(session, conversation, "assistant", reply_text)
-        if task_id is not None:
-            card = render_task_card(repo.task_snapshot(session, task_id), budget=budget.snapshot())
-    return card
+        repo.add_message(session, conversation, "assistant", stored)
+        if state.task_id is not None:
+            card = render_task_card(
+                repo.task_snapshot(session, state.task_id), budget=budget.snapshot()
+            )
+    return rendered, card
+
+
+def _stop_for_tool_error(
+    state: TurnState,
+    decision: error_policy.Decision,
+    *,
+    step_index: int,
+    provider: LLMProvider,
+    context_observer: ContextObserver | None,
+    notify: Callable[[str], None],
+) -> ChatReply:
+    """Terminal path for param/permission/service stops; writes are never retried."""
+    reason = decision.stop_reason or "service_error"
+    action: AgentAction | None = None
+    reply_text = stop_text(reason)
+    if reason == "service_error" and state.budget.remaining_seconds() > 0:
+        # One final-only call so the model can explain with results it already has.
+        def prepare(retries: list[MessageGroup]) -> ContextBuild:
+            return _build_for_call(
+                strategy=state.context_strategy,
+                history_groups=[],
+                request=state.text,
+                execution_groups=state.execution_groups + retries,
+                summary=None,
+                task_card=None,
+                runtime_facts=_runtime_facts(state, "service_error"),
+                max_chars=state.context_max_chars,
+                include_tools=False,
+            )
+
+        def options_for_call(purpose: str) -> CallOptions:
+            observer = state.attempt_recorder.for_call(purpose, state.task_id)
+            return state.budget.call_options(observer)
+
+        try:
+            action, _ = _next_action(
+                provider,
+                build_messages=prepare,
+                options_for_call=options_for_call,
+                observer=context_observer,
+                strategy=state.context_strategy,
+                final_only=True,
+                schema_retries=1,
+            )
+        except BudgetStop:
+            # The explanation is optional; the service error stays the stop reason.
+            action = None
+        if action is not None and action.final_answer:
+            reply_text = action.final_answer
+    reply_text, card = _persist_terminal(
+        state,
+        step_index=step_index,
+        event=reason,
+        task_status="failed",
+        reply_text=reply_text,
+        action=action,
+    )
+    state.terminal_written = True
+    if card:
+        notify(card)
+    return ChatReply(reply_text, state.recorder.summary())
+
+
+def _pause_reply(state: TurnState, pause: approvals.ApprovalPause) -> str:
+    """Five-part reply for a turn paused on owner consent; nothing has executed."""
+    report = _verification(state, None, "")
+    facts = [
+        line for line in pause.preview.splitlines() if line.startswith(("Tool:", "Operation:"))
+    ]
+    preview_line = "; ".join(facts) or "Đề xuất đang chờ"
+    pending = PendingAction(preview_line, max(0, pause.expires_at - approvals.epoch_now()))
+    return render_task_reply(
+        result="Đang chờ bạn xác nhận đề xuất; thao tác này chưa được thực hiện.",
+        report=report,
+        pending=pending,
+    )
 
 
 def _persist_pre_task_stop(state: TurnState, reason: str) -> ChatReply:
-    reply = _budget_stop_text(reason)
+    reply = stop_text(reason)
     with session_scope(timeout_seconds=state.budget.remaining_seconds()) as session:
         repo.record_trace(
             session,
@@ -594,24 +746,6 @@ def _persist_pre_task_stop(state: TurnState, reason: str) -> ChatReply:
         repo.add_message(session, conversation, "assistant", reply)
     state.terminal_written = True
     return ChatReply(reply, state.recorder.summary())
-
-
-def _budget_stop_text(reason: str) -> str:
-    messages = {
-        "step_limit": "Đã dùng hết số bước công cụ được phép; lượt này dừng.",
-        "time_limit": (
-            "Đã hết thời gian xử lý cho lượt này "
-            "không bắt đầu thêm yêu cầu hoặc thao tác."
-        ),
-        "cost_limit": (
-            "Đã chạm ngân sách chi phí của lượt này "
-            "không bắt đầu thêm yêu cầu hoặc thao tác."
-        ),
-        "budget_unavailable": "Không thể xác định an toàn ngân sách của yêu cầu; lượt này dừng.",
-        "repeated_error": "Một lỗi công cụ lặp lại quá số lần cho phép; lượt này dừng.",
-        "cancelled": "Lượt xử lý đã được hủy.",
-    }
-    return messages.get(reason, "Lượt xử lý đã dừng an toàn.")
 
 
 def _full_observation(
@@ -684,6 +818,8 @@ class TurnState:
     terminal_written: bool = False
     runtime_forced_web_tool: bool = False
     runtime_forced_document_page: bool = False
+    param_corrections: int = 0
+    recovery: dict[str, Any] | None = None
 
 
 _checkpoints: dict[str, TurnState] = {}
@@ -697,21 +833,6 @@ def _action_receipt_key(action: AgentAction) -> tuple[str, str] | None:
         return (spec.name, public_args_hash(spec.args_model.model_validate(action.params)))
     except ValidationError:
         return None
-
-
-def _reply_with_receipts(state: TurnState, text: str) -> str:
-    labels = {"create_reminder": "Đã tạo", "update_reminder": "Đã cập nhật",
-              "cancel_reminder": "Đã hủy"}
-    lines = []
-    for (tool_name, _), receipt in state.receipts.items():
-        data = receipt.result.data
-        if not isinstance(data, dict):
-            continue
-        lines.append(
-            f"- {labels.get(tool_name, tool_name)} reminder #{data['id']} "
-            f"lúc {data['run_at']} ({data['status']})."
-        )
-    return "Thao tác đã thực thi:\n" + "\n".join(lines) + "\n\n" + text if lines else text
 
 
 def _recover_committed_receipt(state: TurnState) -> None:
@@ -905,6 +1026,8 @@ def _runtime_facts(state: TurnState, final_only_reason: str | None = None) -> di
                 state.required_web_tools, state.attempted_web_tools, state.web_search_urls
             )
         )
+    if state.recovery is not None:
+        facts["recovery"] = state.recovery
     if final_only_reason is not None:
         facts["final_only_reason"] = final_only_reason
     return facts
@@ -1052,16 +1175,14 @@ def _run_turn(
                 state.budget.stop_reason = "cancelled"
                 _terminate_active_approval(state, "cancelled")
                 reply_text = "Lượt xử lý đã được hủy trước bước tiếp theo."
-                reply_text = _reply_with_receipts(state, reply_text)
-                card = _persist_terminal(
-                    conversation_id=state.conversation_id,
-                    task_id=state.task_id,
+                reply_text = reply_text
+                reply_text, card = _persist_terminal(
+                    state,
                     step_index=step_index,
                     event="cancelled",
                     task_status="cancelled",
                     reply_text=reply_text,
                     action=None,
-                    budget=state.budget,
                 )
                 state.terminal_written = True
                 if card:
@@ -1074,6 +1195,13 @@ def _run_turn(
                     and not (state.direct_effects - state.attempted_effects)
                 )
 
+                tool_budget_exhausted = state.budget.steps_used >= state.budget.max_steps
+                final_only_reason = (
+                    "document_pages_completed" if finalize_document
+                    else "tool_budget_exhausted" if tool_budget_exhausted
+                    else None
+                )
+
                 def prepare(retries: list[MessageGroup]) -> ContextBuild:
                     return _build_for_call(
                         strategy=state.context_strategy,
@@ -1082,11 +1210,10 @@ def _run_turn(
                         execution_groups=state.execution_groups + retries,
                         summary=None if finalize_document else state.context_summary,
                         task_card=None if finalize_document else state.task_card,
-                        runtime_facts=_runtime_facts(state, 
-                            "document_pages_completed" if finalize_document else None
-                        ),
+                        runtime_facts=_runtime_facts(state, final_only_reason),
                         max_chars=state.context_max_chars,
-                        include_tools=not finalize_document,
+                        # A final-only decision must not see tools it cannot call.
+                        include_tools=final_only_reason is None,
                     )
 
                 def options_for_call(purpose: str) -> CallOptions:
@@ -1099,10 +1226,7 @@ def _run_turn(
                     options_for_call=options_for_call,
                     observer=context_observer,
                     strategy=state.context_strategy,
-                    final_only=(
-                        finalize_document
-                        or state.budget.steps_used >= state.budget.max_steps
-                    ),
+                    final_only=final_only_reason is not None,
                 )
                 state.runtime_forced_web_tool = False
                 required_web_action = _required_web_action(
@@ -1198,16 +1322,14 @@ def _run_turn(
                         )
                         if recovered_action is not None:
                             reply_text = recovered_action.final_answer or ""
-                            reply_text = _reply_with_receipts(state, reply_text)
-                            card = _persist_terminal(
-                                conversation_id=state.conversation_id,
-                                task_id=state.task_id,
+                            reply_text = reply_text
+                            reply_text, card = _persist_terminal(
+                                state,
                                 step_index=step_index,
                                 event="final_after_context_recovery",
                                 task_status="completed",
                                 reply_text=reply_text,
                                 action=recovered_action,
-                                budget=state.budget,
                             )
                             state.terminal_written = True
                             if card:
@@ -1216,18 +1338,14 @@ def _run_turn(
                     if state.budget.steps_used >= state.budget.max_steps:
                         state.budget.stop_reason = "step_limit"
                         reason = "step_limit"
-                        reply_text = _reply_with_receipts(
-                            state, _budget_stop_text(reason)
-                        )
-                        card = _persist_terminal(
-                            conversation_id=state.conversation_id,
-                            task_id=state.task_id,
+                        reply_text = stop_text(reason)
+                        reply_text, card = _persist_terminal(
+                            state,
                             step_index=step_index,
                             event=reason,
                             task_status=reason,
                             reply_text=reply_text,
                             action=None,
-                            budget=state.budget,
                         )
                         state.terminal_written = True
                         if card:
@@ -1239,17 +1357,15 @@ def _run_turn(
                         if overflow
                         else "Mô hình trả dữ liệu không hợp lệ nhiều lần nên lượt này dừng lại."
                     )
-                    reply_text = _reply_with_receipts(state, reply_text)
+                    reply_text = reply_text
                     event = "context_overflow" if overflow else "schema_failure"
-                    card = _persist_terminal(
-                        conversation_id=state.conversation_id,
-                        task_id=state.task_id,
+                    reply_text, card = _persist_terminal(
+                        state,
                         step_index=step_index,
                         event=event,
                         task_status="failed",
                         reply_text=reply_text,
                         action=None,
-                        budget=state.budget,
                     )
                     state.terminal_written = True
                     if card:
@@ -1290,16 +1406,14 @@ def _run_turn(
                 if lease.cancel_event.is_set():
                     state.budget.stop_reason = "cancelled"
                     reply_text = "Lượt xử lý đã được hủy sau khi bước hiện tại hoàn tất."
-                    reply_text = _reply_with_receipts(state, reply_text)
-                    card = _persist_terminal(
-                        conversation_id=state.conversation_id,
-                        task_id=state.task_id,
+                    reply_text = reply_text
+                    reply_text, card = _persist_terminal(
+                        state,
                         step_index=step_index,
                         event="cancelled",
                         task_status="cancelled",
                         reply_text=reply_text,
                         action=action,
-                        budget=state.budget,
                     )
                     state.terminal_written = True
                     if card:
@@ -1369,16 +1483,14 @@ def _run_turn(
                             else "final"
                         )
                         task_status = "completed"
-                    reply_text = _reply_with_receipts(state, reply_text)
-                    card = _persist_terminal(
-                        conversation_id=state.conversation_id,
-                        task_id=state.task_id,
+                    reply_text = reply_text
+                    reply_text, card = _persist_terminal(
+                        state,
                         step_index=step_index,
                         event=event,
                         task_status=task_status,
                         reply_text=reply_text,
                         action=action,
-                        budget=state.budget,
                     )
                     state.terminal_written = True
                     if card:
@@ -1393,18 +1505,16 @@ def _run_turn(
                     task_status = "failed" if missing_effects else "step_limit"
                     reply_text = (
                         "Không thể hoàn tất thao tác reminder bắt buộc trong giới hạn lượt này."
-                        if missing_effects else _budget_stop_text("step_limit")
+                        if missing_effects else stop_text("step_limit")
                     )
-                    reply_text = _reply_with_receipts(state, reply_text)
-                    card = _persist_terminal(
-                        conversation_id=state.conversation_id,
-                        task_id=state.task_id,
+                    reply_text = reply_text
+                    reply_text, card = _persist_terminal(
+                        state,
                         step_index=step_index,
                         event=reason,
                         task_status=task_status,
                         reply_text=reply_text,
                         action=action,
-                        budget=state.budget,
                     )
                     state.terminal_written = True
                     if card:
@@ -1475,15 +1585,14 @@ def _run_turn(
                 try:
                     pause = _publish_checkpoint(state, action, result, lease)
                 except ValueError:
-                    reply_text = _reply_with_receipts(
-                        state, "Không thể tạo bản xác nhận đầy đủ, hợp lệ trong giới hạn "
-                        "Telegram. Thao tác đề xuất chưa được thực hiện.",
+                    reply_text = (
+                        "Không thể tạo bản xác nhận đầy đủ, hợp lệ trong giới hạn "
+                        "Telegram. Thao tác đề xuất chưa được thực hiện."
                     )
-                    card = _persist_terminal(
-                        conversation_id=state.conversation_id, task_id=state.task_id,
+                    reply_text, card = _persist_terminal(
+                        state,
                         step_index=step_index, event="approval_invalid",
                         task_status="failed", reply_text=reply_text, action=action,
-                        budget=state.budget,
                     )
                     state.terminal_written = True
                     if card:
@@ -1502,16 +1611,19 @@ def _run_turn(
                     fail_approval_publication(pause.token)
                     state.suspended_action = None
                     raise
-                return ChatReply(
-                    _reply_with_receipts(
-                        state, "Đang chờ bạn xác nhận đề xuất; thao tác này chưa được thực hiện."
-                    ),
-                    state.recorder.summary(), pause,
-                )
+                return ChatReply(_pause_reply(state, pause), state.recorder.summary(), pause)
             state.budget.observe_tool(tool_name, result)
             if state.approval_id is not None:
                 if not result.ok:
                     _recover_committed_receipt(state)
+                    recovered = state.receipts.get(receipt_key) if receipt_key else None
+                    if recovered is not None:
+                        # The effect was committed before the failure: continue on the
+                        # durable receipt instead of reporting a contradictory failure.
+                        result = recovered.result
+                        committed = recovered
+                        state.budget.observe_tool(tool_name, result)
+                if not result.ok:
                     cancelled = lease.cancel_event.is_set()
                     status = "cancelled" if cancelled else (
                         "invalidated" if result.error_code in {
@@ -1519,16 +1631,15 @@ def _run_turn(
                         } else "failed"
                     )
                     _terminate_active_approval(state, status)
-                    reply_text = _reply_with_receipts(
-                        state, "Thao tác được duyệt không thể hoàn tất: "
-                        + (result.error or "lỗi thực thi") + ".",
+                    reply_text = (
+                        "Thao tác được duyệt không thể hoàn tất: "
+                        + (result.error or "lỗi thực thi") + "."
                     )
-                    card = _persist_terminal(
-                        conversation_id=state.conversation_id, task_id=state.task_id,
+                    reply_text, card = _persist_terminal(
+                        state,
                         step_index=step_index, event=f"approval_{status}",
                         task_status="cancelled" if cancelled else "failed",
                         reply_text=reply_text, action=action,
-                        budget=state.budget,
                     )
                     state.terminal_written = True
                     if card:
@@ -1575,6 +1686,12 @@ def _run_turn(
                                 "total_units": total_units,
                             }
                             state.paginated_documents.add(attachment_id)
+            decision = (
+                error_policy.decide(result, param_corrections_used=state.param_corrections)
+                if state.approval_id is None
+                else error_policy.Decision("continue", classify_result(result))
+            )
+            error_class = decision.error_class.value if decision.error_class else None
             envelope = result.model_dump(mode="json")
             preview = (
                 json.dumps(result.data, ensure_ascii=False, sort_keys=True)
@@ -1626,6 +1743,8 @@ def _run_turn(
                             "tool_call_id": tool_call_id,
                             "ok": result.ok,
                             "error_code": result.error_code,
+                            "error_class": error_class,
+                            "attempts": result.attempts,
                             "sources": result.sources,
                             "preview": preview[:200],
                         },
@@ -1647,6 +1766,9 @@ def _run_turn(
                         "tool_name": tool_name,
                         "ok": result.ok,
                         "error_code": result.error_code,
+                        "error_class": error_class,
+                        "decision": decision.kind,
+                        "attempts": result.attempts,
                     },
                 )
                 state.task_card = render_task_card(
@@ -1663,12 +1785,29 @@ def _run_turn(
                     (
                         {
                             "role": "assistant",
-                            "content": json.dumps(action.model_dump(), ensure_ascii=False),
+                            "content": json.dumps(
+                                action.model_dump(exclude_none=True), ensure_ascii=False
+                            ),
                         },
                         observation,
                     )
                 )
             )
+            if decision.kind == "continue":
+                if result.ok:
+                    # Consecutive semantics: a success resets the one-correction allowance.
+                    state.recovery = None
+                    state.param_corrections = 0
+            elif decision.kind == "correct_once":
+                state.param_corrections += 1
+                state.recovery = error_policy.recovery_facts(state.param_corrections)
+            else:
+                state.budget.check()
+                reply = _stop_for_tool_error(
+                    state, decision, step_index=step_index, provider=provider,
+                    context_observer=context_observer, notify=notify,
+                )
+                return reply
             state.budget.check()
             notify(state.task_card)
             state.step_index += 1
@@ -1678,7 +1817,7 @@ def _run_turn(
         _recover_committed_receipt(state)
         approval_status = "cancelled" if stop.reason == "cancelled" else "interrupted"
         _terminate_active_approval(state, approval_status)
-        reply_text = _reply_with_receipts(state, _budget_stop_text(stop.reason))
+        reply_text = stop_text(stop.reason)
         if state.task_id is None:
             return _persist_pre_task_stop(state, stop.reason)
         if not state.terminal_written:
@@ -1688,15 +1827,13 @@ def _run_turn(
                 else "cancelled" if stop.reason == "cancelled"
                 else "failed"
             )
-            card = _persist_terminal(
-                conversation_id=state.conversation_id,
-                task_id=state.task_id,
+            reply_text, card = _persist_terminal(
+                state,
                 step_index=state.step_index,
                 event=stop.reason,
                 task_status=task_status,
                 reply_text=reply_text,
                 action=None,
-                budget=state.budget,
             )
             state.terminal_written = True
             if card:
@@ -1708,22 +1845,26 @@ def _run_turn(
         if state.task_id is not None and not state.terminal_written:
             try:
                 _persist_terminal(
-                    conversation_id=state.conversation_id,
-                    task_id=state.task_id,
+                    state,
                     step_index=state.step_index,
                     event="execution_error",
                     task_status="failed",
-                    reply_text=_reply_with_receipts(
-                        state, "Lượt xử lý dừng do lỗi thực thi."
-                    ),
+                    reply_text="Lượt xử lý dừng do lỗi thực thi.",
                     action=None,
-                    budget=state.budget,
                 )
             except Exception:
                 pass
         if state.receipts:
+            # Persistence failed, so verification cannot read the DB; still surface receipts.
+            report = verifier.verify_task(
+                task_id=state.task_id or 0, user_id=state.user_id,
+                receipts=_receipts_for_verifier(state),
+            )
             return ChatReply(
-                _reply_with_receipts(state, "Lượt xử lý dừng do lỗi thực thi."),
+                render_task_reply(
+                    result="Lượt xử lý dừng do lỗi thực thi.", report=report,
+                    limitations=[event_limitation("execution_error") or ""],
+                ),
                 state.recorder.summary(),
             )
         raise

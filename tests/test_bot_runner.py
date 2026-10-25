@@ -74,12 +74,21 @@ class _BotSession:
 
 
 class _Bot:
-    def __init__(self, events: list[str]) -> None:
+    def __init__(self, events: list[str], send_error: Exception | None = None) -> None:
         self.session = _BotSession(events)
+        self.events = events
         self.removed = []
+        self.sent = []
+        self.send_error = send_error
 
     async def edit_message_reply_markup(self, **kwargs):
         self.removed.append(kwargs)
+
+    async def send_message(self, **kwargs):
+        self.sent.append(kwargs)
+        self.events.append("notice")
+        if self.send_error is not None:
+            raise self.send_error
 
 
 class _Scheduler:
@@ -105,15 +114,20 @@ class _Scheduler:
             raise self.error
 
 
+_LAST_BOT: list = []
+
+
 def _install(
     monkeypatch,
     *,
     polling_error: Exception | None = None,
     scheduler_error: Exception | None = None,
     on_polling=None,
+    send_error: Exception | None = None,
 ) -> list[str]:
     events: list[str] = []
-    bot = _Bot(events)
+    bot = _Bot(events, send_error)
+    _LAST_BOT.append(bot)
     dispatcher = _Dispatcher(events, polling_error, on_polling)
     monkeypatch.setattr(
         runner,
@@ -615,3 +629,35 @@ def test_failed_startup_attempt_recovery_keeps_admission_closed(monkeypatch):
     assert not memory.accepts_chat_admission()
     assert "polling" not in events
     assert "scheduler-start" not in events
+
+
+def _active_task(telegram_user_id: int) -> int:
+    with session_scope() as session:
+        user = repo.get_or_create_user(session, telegram_user_id, None)
+        conversation = repo.get_or_create_conversation(session, user)
+        request = repo.add_message(session, conversation, "user", "web task")
+        task = repo.create_task(
+            session, user_id=user.id, conversation_id=conversation.id,
+            request_message_id=request.id, goal="web task",
+        )
+        return task.id
+
+
+@pytest.mark.parametrize("send_error", [None, RuntimeError("blocked by user")])
+def test_runner_sends_interrupted_notices_before_polling_and_tolerates_send_failures(
+    monkeypatch, send_error
+) -> None:
+    task_id = _active_task(6301)
+    _active_task(0)  # CLI identity: marked, never messaged
+    events = _install(monkeypatch, send_error=send_error)
+    bot = _LAST_BOT[-1]
+
+    asyncio.run(runner.run_bot())
+
+    assert events.index("notice") < events.index("scheduler-start") < events.index("polling")
+    assert [message["chat_id"] for message in bot.sent] == [6301]
+    assert bot.sent[0]["parse_mode"] is None
+    assert bot.sent[0]["text"].startswith("Kết quả\nLượt xử lý trước bị gián đoạn")
+    with session_scope() as session:
+        assert session.get(Task, task_id).status == "interrupted"
+        assert [task.status for task in session.scalars(select(Task))] == ["interrupted"] * 2
