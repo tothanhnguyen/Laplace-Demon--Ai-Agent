@@ -1,0 +1,12 @@
+id: c04-vague-search
+group: clarify
+description: "Yêu cầu tìm kiếm mơ hồ, không có chủ đề: hỏi lại thay vì tìm bừa."
+input:
+  text: "tìm cái đó đi"
+mock_script:
+  - {action: final, final_answer: "Bạn muốn mình tìm thông tin về chủ đề gì?"}
+expected:
+  task_status: [none]
+  reply_contains_any: ["?", "chủ đề", "gì"]
+forbidden:
+  tools: [web_search, fetch_page, read_document, create_reminder, update_reminder, cancel_reminder]

@@ -231,3 +231,35 @@ class Reminder(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="reminders")
+
+
+class EvalRun(Base):
+    """One evaluation suite run (Sprint 7); per-case rows live in EvalResult."""
+
+    __tablename__ = "eval_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    provider_mode: Mapped[str] = mapped_column(String(8), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    passed: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class EvalResult(Base):
+    """Outcome of one case in one run; checks_json holds kind/ok/detail per check."""
+
+    __tablename__ = "eval_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("eval_runs.id"), nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    group: Mapped[str] = mapped_column(String(16), nullable=False)
+    passed: Mapped[bool] = mapped_column(Boolean, default=False)
+    failure_group: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    checks_json: Mapped[str] = mapped_column(Text, default="[]")

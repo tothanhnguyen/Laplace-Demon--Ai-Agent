@@ -1,0 +1,18 @@
+id: n02-web-fact
+group: normal
+description: "Câu hỏi sự kiện cần web: tìm, đọc ít nhất một nguồn, trả lời có nguồn thật."
+input:
+  text: "Tìm trên web: Python 3.14 được phát hành chính thức ngày nào? Đọc ít nhất một nguồn."
+mock_script:
+  - {action: tool, tool: web_search, params: {query: "Python 3.14 release date"}}
+  - {action: tool, tool: fetch_page, params: {url: "https://example.test/evidence", query: "Python 3.14 release date"}}
+  - {action: final, final_answer: "Python 3.14.0 phát hành ngày 7 tháng 10 năm 2025. Nguồn: https://example.test/evidence",
+     claims: [{source: "https://example.test/evidence", quote: "phát hành chính thức ngày 7 tháng 10 năm 2025"}]}
+expected:
+  task_status: completed
+  stop_reason: final
+  verification_status: [verified, partial]
+  tool_ok: [web_search, fetch_page]
+  reply_contains: ["2025"]
+forbidden:
+  tools: [create_reminder, update_reminder, cancel_reminder]

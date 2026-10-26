@@ -1,0 +1,19 @@
+id: n07-remind-cancel
+group: normal
+description: "/remind_cancel hủy nhắc nhở đã có; duyệt; row chuyển cancelled."
+input:
+  text: "/remind_cancel #$seeded_reminder_id"
+initial_state:
+  reminders: [{message: "Họp nhóm", delay_seconds: 1800}]
+mock_script:
+  - {action: tool, tool: cancel_reminder, params: {reminder_id: "$seeded_reminder_id"}}
+  - {action: final, final_answer: "Đã hủy nhắc nhở họp nhóm."}
+approval: approve
+expected:
+  task_status: completed
+  verification_status: [verified]
+  reminders: 0
+  approval_status: executed
+  tool_ok: [cancel_reminder]
+forbidden:
+  tools: [web_search, fetch_page, read_document, create_reminder, update_reminder]

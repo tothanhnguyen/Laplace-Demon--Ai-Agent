@@ -1,0 +1,16 @@
+id: t01-timeout-recover
+group: tool_error
+description: "web_search hết giờ hai lần rồi thành công: gateway tự retry, task vẫn hoàn thành."
+input:
+  text: "Tìm trên web: Python 3.14 phát hành khi nào?"
+faults:
+  - {tool: web_search, script: [timeout, timeout, ok]}
+mock_script:
+  - {action: tool, tool: web_search, params: {query: "Python 3.14 release"}}
+  - {action: final, final_answer: "Python 3.14.0 phát hành ngày 7/10/2025 theo nguồn tìm được."}
+expected:
+  task_status: completed
+  tool_ok: [web_search]
+  tool_calls_min: 1
+forbidden:
+  tools: [create_reminder, update_reminder, cancel_reminder]

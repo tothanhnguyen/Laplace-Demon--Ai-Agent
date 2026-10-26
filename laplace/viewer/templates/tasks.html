@@ -1,0 +1,25 @@
+{% extends "base.html" %}{% block title %}Tác vụ{% endblock %}
+{% block content %}
+<h1>Tác vụ ({{ total }})</h1>
+<form class="filter" method="get" action="/tasks">
+<label>Trạng thái<select name="status"><option value="">(tất cả)</option>
+{% for s in statuses %}<option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+<label>Từ ngày (UTC)<input type="date" name="from" value="{{ date_from }}"></label>
+<label>Đến ngày (UTC)<input type="date" name="to" value="{{ date_to }}"></label>
+<button type="submit">Lọc</button>
+</form>
+<table><thead><tr><th>#</th><th>Tạo lúc (UTC)</th><th>Người dùng</th><th>Mục tiêu</th><th>Trạng thái</th><th>Kiểm chứng</th></tr></thead>
+<tbody>
+{% for item in tasks %}<tr>
+<td><a href="/tasks/{{ item.task.id }}">{{ item.task.id }}</a></td>
+<td>{{ item.task.created_at|fmt_dt }}</td>
+<td>{{ item.username|safe_text }} <span class="muted">{{ item.telegram_user_id|mask_id }}</span></td>
+<td>{{ item.task.goal|safe_text|truncate(120) }}</td>
+<td><span class="tag">{{ item.task.status }}</span></td>
+<td>{{ item.task.verification_status or '—' }}</td>
+</tr>{% else %}<tr><td colspan="6" class="muted">Chưa có tác vụ.</td></tr>{% endfor %}
+</tbody></table>
+<p class="muted">Trang {{ page }}/{{ pages }}
+{% if page > 1 %}<a href="/tasks?status={{ status }}&from={{ date_from }}&to={{ date_to }}&page={{ page - 1 }}">← trước</a>{% endif %}
+{% if page < pages %}<a href="/tasks?status={{ status }}&from={{ date_from }}&to={{ date_to }}&page={{ page + 1 }}">sau →</a>{% endif %}</p>
+{% endblock %}

@@ -1,0 +1,14 @@
+id: n01-greeting
+group: normal
+description: "Chào hỏi thuần hội thoại: không tạo task, không gọi tool, trả lời có nội dung."
+input:
+  text: "Chào bạn, hôm nay thế nào?"
+mock_script:
+  - {action: final, final_answer: "Chào bạn! Mình ổn, bạn cần mình giúp gì hôm nay?"}
+expected:
+  task_status: none
+  reply_contains: ["chào"]
+  tool_calls_min: 0
+forbidden:
+  tools: [web_search, fetch_page, read_document, create_reminder, update_reminder, cancel_reminder]
+  write_without_approval: true

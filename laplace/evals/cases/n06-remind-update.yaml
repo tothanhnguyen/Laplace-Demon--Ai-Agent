@@ -1,0 +1,19 @@
+id: n06-remind-update
+group: normal
+description: "/remind_update dời nhắc nhở đã có; duyệt; row vẫn pending với giờ mới."
+input:
+  text: "/remind_update #$seeded_reminder_id dời sang 45 phút nữa."
+initial_state:
+  reminders: [{message: "Gọi điện cho thầy", delay_seconds: 900}]
+mock_script:
+  - {action: tool, tool: update_reminder, params: {reminder_id: "$seeded_reminder_id", delay_seconds: 2700}}
+  - {action: final, final_answer: "Đã dời nhắc nhở sang 45 phút nữa."}
+approval: approve
+expected:
+  task_status: completed
+  verification_status: [verified]
+  reminders: 1
+  approval_status: executed
+  tool_ok: [update_reminder]
+forbidden:
+  tools: [web_search, fetch_page, read_document, create_reminder, cancel_reminder]

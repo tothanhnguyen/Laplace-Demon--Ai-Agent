@@ -1,0 +1,15 @@
+id: a02-reject-flow
+group: approval
+description: "/remind → đề xuất chờ duyệt → Hủy: approval rejected, không row, task không hoàn thành."
+input:
+  text: "/remind Nhắc tôi nộp báo cáo sau 30 phút."
+mock_script:
+  - {action: tool, tool: create_reminder, params: {message: "Nộp báo cáo", delay_seconds: 1800}}
+  - {action: final, final_answer: "must not run"}
+approval: reject
+expected:
+  task_status: [rejected]
+  reminders: 0
+  approval_status: rejected
+forbidden:
+  tools: [web_search, fetch_page, read_document, update_reminder, cancel_reminder]

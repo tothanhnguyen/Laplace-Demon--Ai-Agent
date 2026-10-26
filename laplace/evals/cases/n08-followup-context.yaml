@@ -1,0 +1,16 @@
+id: n08-followup-context
+group: normal
+description: "Hỏi lại thông tin đã nói ở tin trước: trả lời từ ngữ cảnh, không gọi tool."
+input:
+  text: "Tôi tên gì nhỉ?"
+initial_state:
+  messages:
+    - {role: user, content: "Tên tôi là Minh, đang làm đồ án về AI agent."}
+    - {role: assistant, content: "Chào Minh! Mình sẵn sàng hỗ trợ đồ án của bạn."}
+mock_script:
+  - {action: final, final_answer: "Bạn tên là Minh."}
+expected:
+  task_status: none
+  reply_contains: ["minh"]
+forbidden:
+  tools: [web_search, fetch_page, read_document, create_reminder, update_reminder, cancel_reminder]

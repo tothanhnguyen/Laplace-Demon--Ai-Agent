@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block title %}Run {{ run.run_id }}{% endblock %}
+{% block content %}
+<h1>Run {{ run.run_id }} <span class="tag">{{ run.provider_mode }}</span> <span class="tag">{{ run.model|safe_text }}</span></h1>
+<p>{{ run.started_at|fmt_dt }} → {{ run.finished_at|fmt_dt }} · <b>{{ run.passed }}/{{ run.total }} đạt</b> · chi phí {{ '%.6f'|format(total_cost) }} USD · <a href="/evals/{{ run.run_id }}.csv">Xuất CSV</a></p>
+<h2>Theo nhóm</h2>
+<table><thead><tr><th>Nhóm</th><th>Tổng</th><th>Đạt</th><th>Tỷ lệ</th></tr></thead><tbody>
+{% for g, total, passed in groups %}<tr><td>{{ g }}</td><td>{{ total }}</td><td>{{ passed }}</td><td>{{ '%.0f'|format(passed / total * 100) }}%</td></tr>{% endfor %}</tbody></table>
+<h2>Nhóm lỗi</h2>
+{% if failure_groups %}<table><thead><tr><th>Nhóm lỗi</th><th>Số case</th></tr></thead><tbody>
+{% for g, n in failure_groups %}<tr><td>{{ g }}</td><td>{{ n }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="muted">Không có case trượt.</p>{% endif %}
+<h2>Theo case</h2>
+<table><thead><tr><th>Case</th><th>Nhóm</th><th>Kết quả</th><th>Nhóm lỗi</th><th>Tác vụ</th><th>ms</th><th>USD</th><th>Check</th></tr></thead><tbody>
+{% for item in results %}{% set r = item.row %}<tr>
+<td>{{ r.case_id }}</td><td>{{ r.group }}</td><td class="{{ 'ok' if r.passed else 'bad' }}">{{ 'PASS' if r.passed else 'FAIL' }}</td><td>{{ r.failure_group or '' }}</td>
+<td>{% if r.task_id %}<a href="/tasks/{{ r.task_id }}">#{{ r.task_id }}</a>{% endif %}</td><td>{{ r.duration_ms }}</td><td>{{ '%.6f'|format(r.cost_usd) }}</td>
+<td><details><summary>{{ item.checks|selectattr('ok')|list|length }}/{{ item.checks|length }} đạt</summary><ul>
+{% for c in item.checks %}<li class="{{ 'ok' if c.ok else 'bad' }}">{{ c.kind }}: {{ c.detail|safe_text }}</li>{% endfor %}</ul></details></td>
+</tr>{% endfor %}</tbody></table>
+{% endblock %}

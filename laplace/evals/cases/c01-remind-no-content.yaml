@@ -1,0 +1,14 @@
+id: c01-remind-no-content
+group: clarify
+description: "/remind không nội dung, không thời điểm: không được tạo row; phải hỏi lại hoặc dừng an toàn."
+input:
+  text: "/remind"
+mock_script:  # runtime asks up to two corrections for the required /remind effect
+  - {action: final, final_answer: "Bạn muốn mình nhắc việc gì và vào lúc nào?"}
+  - {action: final, final_answer: "Bạn muốn mình nhắc việc gì và vào lúc nào?"}
+  - {action: final, final_answer: "Bạn muốn mình nhắc việc gì và vào lúc nào?"}
+expected:
+  task_status: [none, failed]
+  reminders: 0
+forbidden:
+  tools: [web_search, fetch_page, read_document, update_reminder, cancel_reminder]

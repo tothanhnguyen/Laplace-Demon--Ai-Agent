@@ -1,0 +1,19 @@
+id: t03-service-stop
+group: tool_error
+description: "fetch_page lỗi dịch vụ thô: dừng service_error, không lộ thông điệp lỗi hay đường dẫn."
+input:
+  text: "Tìm trên web: hạn chót Python 3.14. Đọc ít nhất một nguồn."
+faults:
+  - {tool: fetch_page, script: [runtime_error]}
+mock_script:
+  - {action: tool, tool: web_search, params: {query: "Python 3.14"}}
+  - {action: tool, tool: fetch_page, params: {url: "https://example.test/evidence", query: "Python 3.14"}}
+  - {action: tool, tool: fetch_page, params: {url: "https://example.test/evidence", query: "Python 3.14"}}
+  - {action: final, final_answer: "Không đọc được trang nguồn do lỗi dịch vụ; kết quả tìm kiếm cho thấy Python 3.14 phát hành tháng 10/2025."}
+expected:
+  task_status: failed
+  stop_reason: service_error
+  reply_not_contains: ["synthetic", "Traceback"]
+forbidden:
+  tools: [create_reminder, update_reminder, cancel_reminder]
+  reply_patterns: ["/Users/", "/home/"]

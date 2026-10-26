@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block title %}Thống kê{% endblock %}
+{% block content %}
+<h1>Thống kê tổng hợp</h1>
+<form class="filter" method="get" action="/stats">
+<label>Từ ngày (UTC)<input type="date" name="from" value="{{ date_from }}"></label>
+<label>Đến ngày (UTC)<input type="date" name="to" value="{{ date_to }}"></label>
+<button type="submit">Lọc</button>
+<a href="/stats.csv?from={{ date_from }}&to={{ date_to }}">Xuất CSV theo ngày</a>
+</form>
+<table><tbody>
+<tr><th>Tổng tác vụ</th><td>{{ total }}</td><th>Hoàn thành</th><td>{{ completed }} ({{ '%.0f'|format(completion_rate * 100) }}%)</td></tr>
+<tr><th>Số bước trung bình</th><td>{{ '%.2f'|format(avg_steps) }}</td><th>Lời gọi mô hình</th><td>{{ llm.calls }}</td></tr>
+<tr><th>Token vào / ra</th><td>{{ llm.prompt_tokens }} / {{ llm.completion_tokens }}</td><th>Chi phí (USD, đã biết / tính ngân sách)</th><td>{{ '%.6f'|format(llm.cost_usd) }} / {{ '%.6f'|format(llm.budget_charge_usd) }}</td></tr>
+</tbody></table>
+<h2>Theo trạng thái</h2>
+<table><thead><tr><th>Trạng thái</th><th>Số tác vụ</th></tr></thead><tbody>
+{% for s, n in by_status %}<tr><td>{{ s }}</td><td>{{ n }}</td></tr>{% else %}<tr><td colspan="2" class="muted">Chưa có dữ liệu.</td></tr>{% endfor %}</tbody></table>
+<h2>Theo trạng thái kiểm chứng</h2>
+<table><thead><tr><th>Kiểm chứng</th><th>Số tác vụ</th></tr></thead><tbody>
+{% for s, n in by_verification %}<tr><td>{{ s }}</td><td>{{ n }}</td></tr>{% endfor %}</tbody></table>
+<h2>Công cụ</h2>
+<table><thead><tr><th>Công cụ</th><th>Lời gọi</th><th>Lỗi</th><th>Độ trễ TB (ms)</th></tr></thead><tbody>
+{% for name, calls, failed, latency in tools %}<tr><td>{{ name }}</td><td>{{ calls }}</td><td class="{{ 'bad' if failed else '' }}">{{ failed }}</td><td>{{ '%.0f'|format(latency) }}</td></tr>{% else %}<tr><td colspan="4" class="muted">Chưa gọi công cụ.</td></tr>{% endfor %}</tbody></table>
+<h2>Theo ngày (UTC)</h2>
+<table><thead><tr><th>Ngày</th><th>Tác vụ</th><th>Hoàn thành</th><th>Chi phí USD</th></tr></thead><tbody>
+{% for day, n, c, cost in by_day %}<tr><td>{{ day }}</td><td>{{ n }}</td><td>{{ c }}</td><td>{{ '%.6f'|format(cost) }}</td></tr>{% endfor %}</tbody></table>
+{% endblock %}

@@ -1,0 +1,12 @@
+id: c03-document-missing
+group: clarify
+description: "Nhờ đọc file nhưng không đính kèm: không bịa attachment, hỏi lại."
+input:
+  text: "Đọc file này và tóm tắt giúp tôi."
+mock_script:
+  - {action: final, final_answer: "Mình chưa thấy tệp đính kèm. Bạn gửi lại file (TXT, PDF hoặc DOCX) nhé."}
+expected:
+  task_status: [none, failed, completed]
+  reply_contains_any: ["tệp", "file", "đính kèm"]
+forbidden:
+  tools: [create_reminder, update_reminder, cancel_reminder]

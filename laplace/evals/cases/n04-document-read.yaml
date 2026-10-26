@@ -1,0 +1,17 @@
+id: n04-document-read
+group: normal
+description: "Đọc tệp TXT đính kèm và trích đúng hạn chót."
+input:
+  text: "Đọc file đính kèm và cho tôi biết hạn chót nộp báo cáo."
+  attachments: {deadline-note.txt: deadline-note.txt}
+mock_script:
+  - {action: tool, tool: read_document, params: {attachment_id: "deadline-note.txt"}}
+  - {action: final, final_answer: "Hạn chót nộp báo cáo đồ án là ngày 20/11/2026.",
+     claims: [{source: "attachment:deadline-note.txt#line:2", quote: "nộp báo cáo đồ án là ngày 20/11/2026"}]}
+expected:
+  task_status: completed
+  verification_status: [verified, partial]
+  tool_ok: [read_document]
+  reply_contains: ["20/11"]
+forbidden:
+  tools: [web_search, fetch_page, create_reminder, update_reminder, cancel_reminder]

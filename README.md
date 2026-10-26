@@ -281,6 +281,49 @@ nhận đúng một thông báo theo khuôn trên. Hệ thống **không tự ch
 Báo cáo phân loại lỗi và ma trận fault injection nằm trong tài liệu nội bộ của
 đồ án.
 
+## Bộ đánh giá và trang quan sát (Sprint 7)
+
+Bộ đánh giá chạy bằng một lệnh trên chính runtime chat (gateway tool, approval,
+verifier), với SQLite riêng cho mỗi lần chạy trong `var/evals/<run_id>/`:
+
+```bash
+# tự kiểm offline: MockLLM theo kịch bản, không gọi mạng (20/20 phải đạt)
+.venv/bin/python -m laplace.evals --provider mock
+
+# phép đo thật: provider/model theo .env (ví dụ Router9), Tavily live cho case web
+.venv/bin/python -m laplace.evals --provider real --run-id baseline-$(date +%Y%m%d)
+
+# chạy một vài case
+.venv/bin/python -m laplace.evals --provider mock --only n02-web-fact a02-reject-flow
+```
+
+Mỗi case là một file YAML trong `laplace/evals/cases/` gồm: tình huống ban đầu
+(`initial_state`), đầu vào, kịch bản mock, lỗi tiêm vào tool (`faults`), quyết
+định duyệt (`approval`), kết quả mong đợi (`expected`: trạng thái task, kiểm
+chứng, số reminder, tool phải `ok`…) và hành động bị cấm (`forbidden`: tool cấm,
+ghi dữ liệu không qua duyệt, mẫu không được lộ trong câu trả lời). Bộ hiện có
+20 case: 8 nhiệm vụ thường, 4 thiếu thông tin, 3 lỗi tool, 3 injection, 2 cần
+duyệt. Oracle là DB, không phải lời mô hình. Mỗi lần chạy ghi `results.json`,
+`report.md` và hai bảng `eval_runs` / `eval_results`; mã thoát `0` khi mọi case
+đạt, `1` khi có case trượt, `2` khi harness lỗi.
+
+Trang quan sát chỉ đọc, chỉ bind `127.0.0.1`, không xác thực:
+
+```bash
+.venv/bin/python -m laplace --viewer --port 8787                      # DB cấu hình
+.venv/bin/python -m laplace --viewer --db sqlite:///var/evals/<run_id>/laplace.db
+```
+
+- `/tasks`, `/tasks/{id}`: danh sách tác vụ (lọc trạng thái, ngày), dòng thời
+  gian từng bước, lời gọi tool/mô hình, trace, kết quả kiểm chứng.
+- `/stats` (+ `/stats.csv`): tỷ lệ hoàn thành, số bước trung bình, tool, token,
+  chi phí, theo ngày.
+- `/evals`, `/evals/{run_id}` (+ `.csv`): kết quả từng lần đánh giá theo nhóm,
+  theo case, nhóm lỗi, link sang tác vụ tương ứng.
+
+Mọi chuỗi hiển thị đi qua bộ lọc redact như nhật ký. Không mở viewer ra ngoài
+máy; không có cơ chế đăng nhập.
+
 ## Kiểm tra chất lượng
 
 ```bash
