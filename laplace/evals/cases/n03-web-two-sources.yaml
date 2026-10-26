@@ -1,0 +1,19 @@
+id: n03-web-two-sources
+group: normal
+description: "Tóm tắt từ hai nguồn: tìm rồi đọc hai trang, câu trả lời có nguồn đã đọc."
+input:
+  text: "Tìm trên web lịch sử ngôn ngữ Python từ 1991 đến nay, đọc hai nguồn rồi tóm tắt ngắn."
+mock_script:
+  - {action: tool, tool: web_search, params: {query: "lịch sử Python 1991"}}
+  - {action: tool, tool: fetch_page, params: {url: "https://example.test/evidence", query: "lịch sử Python"}}
+  - {action: tool, tool: fetch_page, params: {url: "https://example.test/evidence/2", query: "lịch sử Python"}}
+  - {action: final, final_answer: "Python ra đời năm 1991 do Guido van Rossum tạo ra và phát triển đến 3.14 (2025). Nguồn: https://example.test/evidence và https://example.test/evidence/2",
+     claims: [{source: "https://example.test/evidence", quote: "Python ra đời năm 1991"}]}
+expected:
+  task_status: completed
+  verification_status: [verified, partial]
+  tool_ok: [web_search, fetch_page]
+  tool_calls_min: 2
+  reply_contains: ["1991"]
+forbidden:
+  tools: [create_reminder, update_reminder, cancel_reminder]

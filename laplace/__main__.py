@@ -4,7 +4,7 @@ import argparse
 import logging
 
 from laplace.agent import Agent
-from laplace.config import Settings
+from laplace.config import Settings, configured_secrets
 from laplace.logging import redact_text, setup_logging
 from laplace.tasks import successful_sample
 
@@ -15,15 +15,7 @@ def main() -> None:
     # ever displaying configuration or passing them to operational events.
     setup_logging()
     settings = Settings()
-    secrets = (
-        settings.gemini_api_key,
-        settings.openai_api_key,
-        settings.groq_api_key,
-        settings.bai_api_key,
-        settings.router9_api_key,
-        settings.telegram_bot_token,
-        settings.tavily_api_key,
-    )
+    secrets = configured_secrets(settings)
     level = logging.getLevelNamesMapping().get(settings.log_level.upper(), logging.INFO)
     setup_logging(secrets=secrets, level=level)
     parser = argparse.ArgumentParser(description="Laplace's Demon command line interface")
@@ -42,6 +34,13 @@ def main() -> None:
         action="store_true",
         help="start the Telegram bot (requires LAPLACE_TELEGRAM_BOT_TOKEN)",
     )
+    parser.add_argument(
+        "--viewer",
+        action="store_true",
+        help="serve the read-only observation pages on 127.0.0.1 (Sprint 7)",
+    )
+    parser.add_argument("--port", type=int, default=8787, help="viewer port")
+    parser.add_argument("--db", default=None, help="viewer database URL override")
     # Giữ tương thích với entrypoint cũ: tham số chưa được hỗ trợ không làm
     # hỏng lệnh mặc định trong giai đoạn bootstrap.
     arguments, _ = parser.parse_known_args()
@@ -50,6 +49,12 @@ def main() -> None:
         from laplace.bot.runner import main as run_bot_main
 
         run_bot_main()
+        return
+
+    if arguments.viewer:
+        from laplace.viewer.__main__ import serve
+
+        serve(port=arguments.port, database_url=arguments.db)
         return
 
     if arguments.chat:

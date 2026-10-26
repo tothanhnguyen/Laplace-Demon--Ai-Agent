@@ -1,0 +1,19 @@
+id: n05-remind-create
+group: normal
+description: "/remind tạo nhắc nhở mới khi đã có một nhắc nhở khác; duyệt rồi kiểm chứng row."
+input:
+  text: "/remind Nhắc tôi nộp bài sau 2 giờ."
+initial_state:
+  reminders: [{message: "Uống nước", delay_seconds: 3600}]
+mock_script:
+  - {action: tool, tool: create_reminder, params: {message: "Nộp bài", delay_seconds: 7200}}
+  - {action: final, final_answer: "Đã đặt nhắc nhở nộp bài sau 2 giờ."}
+approval: approve
+expected:
+  task_status: completed
+  verification_status: [verified]
+  reminders: 2
+  approval_status: executed
+  tool_ok: [create_reminder]
+forbidden:
+  tools: [web_search, fetch_page, read_document, update_reminder, cancel_reminder]

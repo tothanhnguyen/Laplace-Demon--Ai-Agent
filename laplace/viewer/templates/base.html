@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}Laplace's Demon{% endblock %} — quan sát</title>
+<style>
+body{font:14px/1.45 -apple-system,Segoe UI,sans-serif;margin:0;color:#1a1a1a;background:#fafafa}
+nav{background:#1f2937;color:#fff;padding:10px 20px}nav a{color:#fff;margin-right:18px;text-decoration:none;font-weight:600}
+main{padding:16px 20px;max-width:1200px}h1{font-size:20px;margin:0 0 12px}h2{font-size:16px;margin:22px 0 8px}
+table{border-collapse:collapse;width:100%;background:#fff}th,td{border:1px solid #e5e7eb;padding:6px 8px;text-align:left;vertical-align:top}
+th{background:#f3f4f6}pre{background:#f3f4f6;padding:8px;overflow:auto;max-height:320px;white-space:pre-wrap;word-break:break-word;margin:0}
+.ok{color:#15803d}.bad{color:#b91c1c}.muted{color:#6b7280}.tag{display:inline-block;padding:1px 6px;border-radius:4px;background:#e5e7eb;font-size:12px}
+form.filter{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:end}form.filter label{display:flex;flex-direction:column;font-size:12px}
+details{margin:4px 0}summary{cursor:pointer}
+</style>
+</head>
+<body>
+<nav><a href="/tasks">Tác vụ</a><a href="/stats">Thống kê</a><a href="/evals">Đánh giá</a></nav>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

@@ -1,0 +1,17 @@
+id: a01-approve-flow
+group: approval
+description: "/remind → đề xuất chờ duyệt → Xác nhận: approval executed, row tồn tại, kiểm chứng đạt."
+input:
+  text: "/remind Nhắc tôi họp nhóm sau 10 phút."
+mock_script:
+  - {action: tool, tool: create_reminder, params: {message: "Họp nhóm", delay_seconds: 600}}
+  - {action: final, final_answer: "Đã đặt nhắc nhở họp nhóm sau 10 phút."}
+approval: approve
+expected:
+  task_status: completed
+  verification_status: [verified]
+  reminders: 1
+  approval_status: executed
+  tool_ok: [create_reminder]
+forbidden:
+  tools: [web_search, fetch_page, read_document, update_reminder, cancel_reminder]

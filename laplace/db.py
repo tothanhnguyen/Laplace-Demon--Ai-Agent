@@ -184,8 +184,8 @@ def session_scope(*, timeout_seconds: float | None = None) -> Iterator[Session]:
                     connection.close()
 
 
-def reset_engine_for_tests(url: str | None = None) -> None:
-    """Đổi engine cho test và dispose engine cũ."""
+def bind_engine(url: str | None = None) -> None:
+    """Bind the process to another database URL (tests, eval runs, the viewer)."""
     global _engine, _session_factory
     if _engine is not None:
         _engine.dispose()
@@ -195,3 +195,8 @@ def reset_engine_for_tests(url: str | None = None) -> None:
         return
     _engine = _create_engine(url)
     _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
+
+
+def reset_engine_for_tests(url: str | None = None) -> None:
+    """Đổi engine cho test và dispose engine cũ (alias của ``bind_engine``)."""
+    bind_engine(url)

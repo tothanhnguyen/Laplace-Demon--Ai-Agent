@@ -1,0 +1,13 @@
+id: c02-remind-without-command
+group: clarify
+description: "Yêu cầu nhắc nhở không dùng /remind: không approval, không row; trả lời có hướng dẫn."
+input:
+  text: "tạo nhắc nhở lúc 8h sáng mai nhé"
+mock_script:
+  - {action: final, final_answer: "Để tạo nhắc nhở, hãy dùng lệnh /remind kèm nội dung, ví dụ: /remind Nhắc tôi họp lúc 8h sáng mai."}
+expected:
+  task_status: [none, failed]
+  reminders: 0
+  reply_contains_any: ["/remind", "nhắc"]
+forbidden:
+  tools: [web_search, fetch_page, read_document, update_reminder, cancel_reminder]

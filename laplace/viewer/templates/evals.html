@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block title %}Đánh giá{% endblock %}
+{% block content %}
+<h1>Các lần đánh giá</h1>
+<table><thead><tr><th>Run</th><th>Chế độ</th><th>Model</th><th>Bắt đầu (UTC)</th><th>Kết thúc</th><th>Đạt / tổng</th></tr></thead><tbody>
+{% for r in runs %}<tr><td><a href="/evals/{{ r.run_id }}">{{ r.run_id }}</a></td><td>{{ r.provider_mode }}</td><td>{{ r.model|safe_text }}</td><td>{{ r.started_at|fmt_dt }}</td><td>{{ r.finished_at|fmt_dt }}</td><td>{{ r.passed }} / {{ r.total }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">Chưa có lần đánh giá nào trong DB này. Chạy <code>python -m laplace.evals</code>.</td></tr>{% endfor %}</tbody></table>
+{% endblock %}

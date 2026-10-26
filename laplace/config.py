@@ -10,6 +10,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 
+def configured_secrets(settings: "Settings | None" = None) -> tuple[str, ...]:
+    """Non-empty credential values, for log/report/page redaction."""
+    s = settings or Settings()
+    return tuple(v for v in (
+        s.gemini_api_key, s.openai_api_key, s.groq_api_key, s.bai_api_key, s.router9_api_key,
+        s.telegram_bot_token, s.tavily_api_key,
+    ) if v)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,

@@ -1,0 +1,38 @@
+{% extends "base.html" %}{% block title %}Tác vụ #{{ task.id }}{% endblock %}
+{% block content %}
+<h1>Tác vụ #{{ task.id }} <span class="tag">{{ task.status }}</span> <span class="tag">kiểm chứng: {{ task.verification_status or '—' }}</span></h1>
+<p><b>Mục tiêu:</b> {{ task.goal|safe_text }}<br>
+<span class="muted">Người dùng {{ user.username|safe_text if user else '' }} {{ (user.telegram_user_id if user else None)|mask_id }} · tạo {{ task.created_at|fmt_dt }} · cập nhật {{ task.updated_at|fmt_dt }}
+· LLM {{ llm_calls|length }} lượt, {{ llm_tokens }} token, {{ '%.6f'|format(llm_cost) }} USD</span></p>
+{% if request_message %}<h2>Yêu cầu</h2><pre>{{ request_message.content|safe_text }}</pre>{% endif %}
+{% if reply_message %}<h2>Trả lời đã lưu</h2><pre>{{ reply_message.content|safe_text }}</pre>{% endif %}
+
+<h2>Kiểm chứng</h2>
+{% if verification_checks %}<table><thead><tr><th>Loại</th><th>Đạt</th><th>Tham chiếu</th></tr></thead><tbody>
+{% for c in verification_checks %}<tr><td>{{ c.kind|safe_text }}</td><td class="{{ 'ok' if c.ok else 'bad' }}">{{ 'đạt' if c.ok else 'không đạt' }}</td><td>{{ c.ref|safe_text }}</td></tr>{% endfor %}
+</tbody></table>{% else %}<p class="muted">Không có check.</p>{% endif %}
+
+<h2>Dòng thời gian ({{ steps|length }} bước)</h2>
+<table><thead><tr><th>#</th><th>Lúc</th><th>Tên</th><th>Trạng thái</th><th>Hành động</th><th>Dừng</th></tr></thead><tbody>
+{% for s in steps %}<tr>
+<td>{{ s.row.step_index }}</td><td>{{ s.row.created_at|fmt_dt }}</td><td>{{ s.row.name|safe_text }}</td><td>{{ s.row.status }}</td>
+<td>{% if s.action %}<b>{{ s.action.action }}</b>{% if s.action.tool %} → {{ s.action.tool }}{% endif %}
+<details><summary>chi tiết</summary><pre>{{ s.action|tojson(indent=2)|safe_text }}</pre>
+{% if s.observation %}<pre>{{ s.observation|tojson(indent=2)|safe_text|truncate(2000) }}</pre>{% endif %}</details>
+{% elif s.event %}{{ s.event|safe_text }}{% endif %}</td>
+<td>{{ s.stop_reason or '' }}</td>
+</tr>{% endfor %}</tbody></table>
+
+<h2>Lời gọi công cụ ({{ tool_calls|length }})</h2>
+{% for c in tool_calls %}<details {% if not c.ok %}open{% endif %}><summary>#{{ c.id }} <b>{{ c.tool_name }}</b> <span class="{{ 'ok' if c.ok else 'bad' }}">{{ 'ok' if c.ok else 'lỗi' }}</span> · {{ c.latency_ms }} ms · {{ c.created_at|fmt_dt }}{% if c.approval_id %} · duyệt #{{ c.approval_id }}{% endif %}</summary>
+<pre>{{ c.params_json|pretty_json|safe_text }}</pre><pre>{{ c.result_json|pretty_json|safe_text }}</pre></details>
+{% else %}<p class="muted">Không gọi công cụ.</p>{% endfor %}
+
+<h2>Lời gọi mô hình ({{ llm_calls|length }})</h2>
+<table><thead><tr><th>#</th><th>Mục đích</th><th>Provider/model</th><th>Token vào/ra</th><th>USD</th><th>ms</th><th>Kế toán</th></tr></thead><tbody>
+{% for l in llm_calls %}<tr><td>{{ l.id }}</td><td>{{ l.purpose|safe_text }}</td><td>{{ l.provider|safe_text }}/{{ l.model|safe_text }}</td><td>{{ l.prompt_tokens }}/{{ l.completion_tokens }}</td><td>{{ '%.6f'|format(l.cost_usd) }}</td><td>{{ l.latency_ms }}</td><td>{{ l.accounting_status or '' }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">Không có.</td></tr>{% endfor %}</tbody></table>
+
+<h2>Trace ({{ traces|length }})</h2>
+{% for t in traces %}<details><summary>bước {{ t.row.step_index }} · {{ (t.payload.event if t.payload else '')|safe_text }} · {{ t.row.created_at|fmt_dt }}</summary><pre>{{ t.row.payload_json|pretty_json|safe_text }}</pre></details>{% endfor %}
+{% endblock %}
